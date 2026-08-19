@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { ApplicationModule } from '../application-runtime'
 import type { PermissionGrantRegistry } from '../permission-grants/registry'
-import type { SettingsService } from '../settings/service'
+import type { ConnectorApplicationSettingsCapabilities } from '../settings/service-capabilities'
 import type { UploadRepository } from '../uploads/repository'
 import type { SpecialistProfileView } from '../../shared/specialist'
 import type {
@@ -17,20 +17,8 @@ import { toCustomMcpConfig } from './custom-mcp-bootstrap'
 import { ConnectorRuntimeSettingsProjection } from './runtime-settings-projection'
 import { ConnectorService, type ConnectorCallContext } from './service'
 
-type ConnectorApplicationSettings = Pick<
-  SettingsService,
-  | 'getConnectors'
-  | 'saveCustomServerOAuthState'
-  | 'setCustomServerRuntimeProjectionProvider'
-  | 'setCustomServerAuthenticator'
-  | 'previewSkillArchive'
-  | 'importSkillArchiveBatch'
-  | 'scanRepoSkills'
-  | 'importSkill'
->
-
 export type ConnectorApplicationDeps = {
-  settings: ConnectorApplicationSettings
+  settings: ConnectorApplicationSettingsCapabilities
   skillsDir: string
   openExternal: (url: string) => Promise<void> | void
   notifyStatusChanged: () => void
@@ -81,16 +69,10 @@ const previewArgs = (args: Record<string, unknown>): string => {
   return json.length > 300 ? `${json.slice(0, 300)}…` : json
 }
 
-export const createConnectorApplicationModule = (
-  deps: ConnectorApplicationDeps
-): ApplicationModule<ConnectorApplication> => {
-  const mcpClientManager =
-    deps.mcpClientManager ??
-    new McpClientManager({
-      openExternal: deps.openExternal,
-      saveOAuthState: (serverId, state) => deps.settings.saveCustomServerOAuthState(serverId, state)
-    })
-
+const createConnectorApplication = (
+  deps: ConnectorApplicationDeps,
+  mcpClientManager: McpClientManager
+): ConnectorApplication => {
   const runtimeSettings = new ConnectorRuntimeSettingsProjection({
     readConnectors: () => deps.settings.getConnectors(),
     skillsDir: deps.skillsDir,
@@ -170,15 +152,40 @@ export const createConnectorApplicationModule = (
   })
 
   return {
-    name: 'connector-application',
-    capability: {
-      connectorService,
-      runtimeSettings,
-      mcpClientManager,
-      skillImporter,
-      connectorApprovals,
-      skillImportApprovals
-    },
-    dispose: () => mcpClientManager.closeAll()
+    connectorService,
+    runtimeSettings,
+    mcpClientManager,
+    skillImporter,
+    connectorApprovals,
+    skillImportApprovals
+  }
+}
+
+export const createConnectorApplicationModule = async (
+  deps: ConnectorApplicationDeps
+): Promise<ApplicationModule<ConnectorApplication>> => {
+  const mcpClientManager =
+    deps.mcpClientManager ??
+    new McpClientManager({
+      openExternal: deps.openExternal,
+      saveOAuthState: (serverId, state) => deps.settings.saveCustomServerOAuthState(serverId, state)
+    })
+
+  try {
+    return {
+      name: 'connector-application',
+      capability: createConnectorApplication(deps, mcpClientManager),
+      dispose: () => mcpClientManager.closeAll()
+    }
+  } catch (error) {
+    try {
+      await mcpClientManager.closeAll()
+    } catch (disposeError) {
+      throw new AggregateError(
+        [error, disposeError],
+        'Connector application construction and disposal failed.'
+      )
+    }
+    throw error
   }
 }
