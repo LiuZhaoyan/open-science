@@ -3,7 +3,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { composeApplicationRuntime } from '../application-runtime'
 import { createConnectorApplicationModule, type ConnectorApplicationDeps } from './application'
 
-const createHarness = () => {
+type TestDoubles = Record<string, ReturnType<typeof vi.fn>>
+
+interface ConnectorApplicationHarness {
+  settings: TestDoubles
+  mcpClientManager: TestDoubles
+  connectorApprovals: TestDoubles
+  skillImportApprovals: TestDoubles
+  deps: ConnectorApplicationDeps
+}
+
+const createHarness = (): ConnectorApplicationHarness => {
   const settings = {
     getConnectors: vi.fn().mockResolvedValue({ customMcpServers: [] }),
     saveCustomServerOAuthState: vi.fn().mockResolvedValue(undefined),
