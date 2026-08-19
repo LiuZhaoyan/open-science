@@ -236,21 +236,6 @@ describe('module test impact commands', () => {
       ]
     ],
     [
-      'src/main/settings/compute-grant-port.ts',
-      [
-        'artifact_provenance',
-        'compute_service',
-        'reviewer_orchestrator',
-        'session_persistence',
-        'settings_backend_resolution',
-        'settings_provider_accounts',
-        'settings_repository',
-        'settings_service_facade',
-        'workspace_page',
-        'workspace_runtime'
-      ]
-    ],
-    [
       'src/main/settings/provider-accounts.ts',
       [
         'artifact_provenance',
@@ -324,8 +309,7 @@ describe('module test impact commands', () => {
     expect(plan.mode).toBe('selective')
     expect([...plan.modules].sort()).toEqual(expectedModules)
     const rootModule =
-      path === 'src/main/settings/repository.ts' ||
-      path === 'src/main/settings/compute-grant-port.ts'
+      path === 'src/main/settings/repository.ts'
         ? 'settings_repository'
         : path === 'src/main/settings/provider-accounts.ts'
           ? 'settings_provider_accounts'

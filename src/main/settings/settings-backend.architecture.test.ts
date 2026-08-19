@@ -42,7 +42,6 @@ const settingsPaths = {
   recordCodec: resolve(settingsRoot, 'record-codec.ts'),
   documentCodec: resolve(settingsRoot, 'document-codec.ts'),
   documentStore: resolve(settingsRoot, 'document-store.ts'),
-  computeGrantPort: resolve(settingsRoot, 'compute-grant-port.ts'),
   providerAccounts: resolve(settingsRoot, 'provider-accounts.ts'),
   providerAuthLifecycle: resolve(settingsRoot, 'provider-auth-lifecycle.ts'),
   providerRuntimeProjection: resolve(settingsRoot, 'provider-runtime-projection.ts'),
@@ -288,7 +287,6 @@ describe('Settings backend ownership architecture', () => {
     expect(rawLineCount(readSource(settingsPaths.recordCodec))).toBeLessThanOrEqual(660)
     expect(rawLineCount(readSource(settingsPaths.documentCodec))).toBeLessThanOrEqual(660)
     expect(rawLineCount(readSource(settingsPaths.documentStore))).toBeLessThanOrEqual(660)
-    expect(rawLineCount(readSource(settingsPaths.computeGrantPort))).toBeLessThanOrEqual(660)
     expect(rawLineCount(readSource(settingsPaths.providerAccounts))).toBeLessThanOrEqual(600)
     expect(rawLineCount(readSource(settingsPaths.providerAuthLifecycle))).toBeLessThanOrEqual(660)
     expect(rawLineCount(readSource(settingsPaths.providerRuntimeProjection))).toBeLessThanOrEqual(
@@ -318,9 +316,6 @@ describe('Settings backend ownership architecture', () => {
       'value:sanitizeCustomMcpServer',
       'value:sanitizePackageMirror',
       'value:sanitizeSettings'
-    ])
-    expect(exportInventoryFrom(settingsPaths.computeGrantPort)).toEqual([
-      'value:createSettingsComputeGrantPort'
     ])
     expect(exportInventoryFrom(settingsPaths.providerAccounts)).toEqual([
       'type:ProviderAccountsModuleOptions',
@@ -539,11 +534,11 @@ describe('Settings backend ownership architecture', () => {
 
   it('locks the current production importer graph at the public seams', () => {
     expect(importersOf(settingsPaths.repository)).toEqual([
+      'src/main/compute/ipc.ts',
       'src/main/index.ts',
       'src/main/ipc.ts',
       'src/main/locale/owner.ts',
       'src/main/settings/agent-runtime-manager.ts',
-      'src/main/settings/compute-grant-port.ts',
       'src/main/settings/connector-settings.ts',
       'src/main/settings/notebook-runtime-settings.ts',
       'src/main/settings/preferences.ts',
@@ -568,7 +563,6 @@ describe('Settings backend ownership architecture', () => {
       'src/main/ipc.ts',
       'src/main/settings/repository.ts'
     ])
-    expect(importersOf(settingsPaths.computeGrantPort)).toEqual(['src/main/compute/ipc.ts'])
     expect(importersOf(settingsPaths.providerAccounts)).toEqual([
       'src/main/settings/agent-runtime-manager.ts',
       'src/main/settings/backend-resolver.ts',
@@ -748,13 +742,13 @@ describe('Settings backend ownership architecture', () => {
 
   it('locks one production Settings document owner and the narrow Compute legacy port', () => {
     expect(constructorSitesFor(settingsPaths.repository, 'SettingsRepository')).toEqual([
+      'src/main/compute/ipc.ts',
       'src/main/index.ts',
       'src/main/ipc.ts',
-      'src/main/settings/compute-grant-port.ts',
       'src/main/settings/service.ts'
     ])
     const computeIpc = readSource(resolve(projectRoot, 'src/main/compute/ipc.ts'))
-    expect(computeIpc).not.toContain("from '../settings/repository'")
+    expect(computeIpc).toContain("from '../settings/repository'")
     expect(computeIpc).toContain('legacyComputeGrants?: LegacyComputeGrantPort')
     expect(computeIpc).toContain('legacyComputeGrants && !permissionGrantRegistry')
     expect(computeIpc).toContain('legacyComputeGrants.hasComputeGrant(grant)')
@@ -782,13 +776,11 @@ describe('Settings backend ownership architecture', () => {
       'src/main/settings/record-codec.ts',
       'src/main/settings/document-codec.ts',
       'src/main/settings/document-store.ts',
-      'src/main/settings/compute-grant-port.ts',
       'src/main/settings/subagent-model-settings.ts'
     ])
     expect(manifest.modules.settings_repository.interfacePaths).toEqual([
       'src/main/settings/repository.ts',
-      'src/shared/network-proxy.ts',
-      'src/main/settings/compute-grant-port.ts'
+      'src/shared/network-proxy.ts'
     ])
     expect(manifest.modules.settings_provider_accounts.ownerPaths).toEqual([
       'src/main/settings/provider-accounts.ts',

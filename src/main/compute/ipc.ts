@@ -27,7 +27,7 @@ import type { DirListing, DownloadDest, LocalFile } from '../../shared/remote-fs
 import { getProjectDbClient } from '../projects/prisma-client'
 import { createLogger, errorLogFields } from '../logger'
 import { resolveDataRoot, resolveStorageRoot } from '../storage-root'
-import { createSettingsComputeGrantPort } from '../settings/compute-grant-port'
+import { SettingsRepository } from '../settings/repository'
 import { codexStorageDir, codexSubscriptionStorageDir } from '../agent-framework/codex'
 import { opencodeConfigDir } from '../agent-framework/opencode'
 import { broadcastToRenderers } from '../renderer-broadcast'
@@ -583,8 +583,7 @@ const createComputeIpcModule = (
   void repository
     .cleanupOrphanCredentials?.()
     .catch((error) => log.warn('orphan Compute Credential cleanup failed', errorLogFields(error)))
-  const effectiveLegacyComputeGrants =
-    legacyComputeGrants ?? createSettingsComputeGrantPort(storageRoot)
+  const effectiveLegacyComputeGrants = legacyComputeGrants ?? new SettingsRepository(storageRoot)
 
   // Broadcast dispatcher status transitions to the renderer, same hook shape as the JobPoller uses.
   const onJobUpdated = createJobUpdatedBroadcaster(repository, dataRoot, jobRepository)

@@ -330,13 +330,11 @@
         "src/main/settings/record-codec.ts",
         "src/main/settings/document-codec.ts",
         "src/main/settings/document-store.ts",
-        "src/main/settings/compute-grant-port.ts",
         "src/main/settings/subagent-model-settings.ts"
       ],
       "interfacePaths": [
         "src/main/settings/repository.ts",
-        "src/shared/network-proxy.ts",
-        "src/main/settings/compute-grant-port.ts"
+        "src/shared/network-proxy.ts"
       ],
       "consumerModules": [
         "settings_provider_accounts",
