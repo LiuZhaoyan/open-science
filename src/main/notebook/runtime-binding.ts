@@ -349,18 +349,45 @@ export class NotebookRuntimeBindingOwner {
 
   async persist(session: RuntimeBindingSession): Promise<void> {
     try {
-      await this.options.repository.setRuntimeBindings(
-        session.projectId,
-        session.sessionId,
-        this.snapshot(session),
-        session.lane
-      )
+      await this.persistStrict(session)
     } catch (error) {
       log.error('failed to persist runtime bindings', {
         sessionId: session.sessionId,
         ...diagnosticErrorFields(error)
       })
     }
+  }
+
+  async persistStrict(session: RuntimeBindingSession): Promise<void> {
+    await this.options.repository.setRuntimeBindings(
+      session.projectId,
+      session.sessionId,
+      this.snapshot(session),
+      session.lane
+    )
+  }
+
+  async requireManagedDefault(
+    language: NotebookLanguage,
+    expectedRuntimeId?: string
+  ): Promise<NotebookSessionRuntimeBinding> {
+    const environment = defaultEnvironment(language)
+    const settings = await this.runtimeSettingsSnapshot(language)
+    const discovered = await this.discover(language, settings?.manualInterpreters ?? [])
+    const match = discovered.find(
+      (env) =>
+        env.provenance === 'app-managed' &&
+        env.condaEnv === environment &&
+        (expectedRuntimeId === undefined || env.envId === expectedRuntimeId)
+    )
+    if (!match || !match.runnable) {
+      throw new Error(
+        expectedRuntimeId === undefined
+          ? `The app-managed ${language} runtime is not runnable.`
+          : `The selected runtime is no longer the app-managed ${language} default. Recheck runtimes and try again.`
+      )
+    }
+    return this.toInternalBinding(match)
   }
 
   async reload(

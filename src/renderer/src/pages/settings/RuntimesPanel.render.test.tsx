@@ -24,7 +24,8 @@ const pythonEnvs: DiscoveredInterpreter[] = [
     interpreterPath: '/data/runtime/envs/default-python-3.12/bin/python',
     label: 'Python 3.12 (managed)',
     version: '3.12.4',
-    runnable: true
+    runnable: true,
+    condaEnv: 'default-python'
   },
   {
     language: 'python',
@@ -315,6 +316,172 @@ describe('RuntimesPanel', () => {
     expect(userToggle?.getAttribute('data-state')).toBe('unchecked')
   })
 
+  it('offers Reinstall only for the default app-managed runtime', async () => {
+    const legacyManaged: DiscoveredInterpreter = {
+      ...pythonEnvs[0],
+      envId: '/data/runtime/envs/legacy-python/bin/python',
+      interpreterPath: '/data/runtime/envs/legacy-python/bin/python',
+      label: 'Legacy managed Python',
+      condaEnv: 'legacy-python'
+    }
+    const agentCreated: DiscoveredInterpreter = {
+      ...pythonEnvs[0],
+      envId: '/data/runtime/envs/agent-analysis/bin/python',
+      interpreterPath: '/data/runtime/envs/agent-analysis/bin/python',
+      label: 'Agent analysis',
+      provenance: 'agent-created',
+      condaEnv: 'agent-analysis'
+    }
+    listEnvironments.mockResolvedValue({
+      python: [pythonEnvs[0], legacyManaged, agentCreated, pythonEnvs[1]],
+      r: rEnvs
+    })
+
+    await render()
+
+    expect(container.querySelector('[data-testid="runtime-reinstall-python"]')).not.toBeNull()
+    for (const label of ['Legacy managed Python', 'Agent analysis', 'System Python']) {
+      const card = Array.from(container.querySelectorAll('[data-testid="runtime-card"]')).find(
+        (candidate) => candidate.textContent?.includes(label)
+      )
+      expect(card?.querySelector('[data-testid="runtime-reinstall-python"]')).toBeNull()
+    }
+    expect(container.querySelector('[data-testid="runtime-reinstall-r"]')).toBeNull()
+  })
+
+  it('confirms a managed reinstall, forwards the exact env identity, and refreshes discovery', async () => {
+    const refreshedPython: DiscoveredInterpreter = {
+      ...pythonEnvs[0],
+      envId: '/data/runtime/envs/default-python-new/bin/python',
+      interpreterPath: '/data/runtime/envs/default-python-new/bin/python',
+      label: 'Python 3.12 (reinstalled)'
+    }
+    listEnvironments
+      .mockResolvedValueOnce({ python: pythonEnvs, r: rEnvs })
+      .mockResolvedValueOnce({ python: [refreshedPython, pythonEnvs[1]], r: rEnvs })
+
+    await render()
+    await click(container.querySelector('[data-testid="runtime-reinstall-python"]'))
+
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    expect(repairBridge).not.toHaveBeenCalled()
+    expect(dialog?.textContent).toContain('Active Notebook kernels will be stopped')
+    expect(dialog?.textContent).toContain('idle kernels will be closed')
+    expect(dialog?.textContent).toContain(
+      'Notebook files, artifacts, and other data are not deleted'
+    )
+    expect(dialog?.textContent).toContain(
+      'Packages installed after the original setup may need to be installed again.'
+    )
+
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((button) =>
+          /reinstall runtime/i.test(button.textContent ?? '')
+        )
+      : null
+    await click(confirmBtn ?? null)
+
+    expect(repairBridge).toHaveBeenCalledWith(
+      'python',
+      '/data/runtime/envs/default-python-3.12/bin/python',
+      expect.any(String)
+    )
+    await act(async () => {})
+    await act(async () => {})
+    expect(container.textContent).toContain('Python 3.12 (reinstalled)')
+    expect(container.textContent).not.toContain('runtime-reinstall-dialog')
+  })
+
+  it('offers the same managed reinstall flow for the default R runtime', async () => {
+    const managedR: DiscoveredInterpreter = {
+      language: 'r',
+      provenance: 'app-managed',
+      envId: '/data/runtime/envs/default-r/bin/R',
+      interpreterPath: '/data/runtime/envs/default-r/bin/R',
+      label: 'R 4.4.3 (managed)',
+      version: '4.4.3',
+      runnable: true,
+      condaEnv: 'default-r'
+    }
+    listEnvironments.mockResolvedValue({ python: pythonEnvs, r: [managedR] })
+
+    await render()
+    await click(container.querySelector('[data-testid="runtime-reinstall-r"]'))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((button) =>
+          /reinstall runtime/i.test(button.textContent ?? '')
+        )
+      : null
+    await click(confirmBtn ?? null)
+
+    expect(repairBridge).toHaveBeenCalledWith('r', managedR.envId, expect.any(String))
+  })
+
+  it('shows reinstall progress and disables mutation controls while the repair is active', async () => {
+    let resolveRepair: (() => void) | undefined
+    repairBridge.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRepair = resolve
+        })
+    )
+    await render()
+    await click(container.querySelector('[data-testid="runtime-reinstall-python"]'))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((button) =>
+          /reinstall runtime/i.test(button.textContent ?? '')
+        )
+      : null
+    await click(confirmBtn ?? null)
+
+    const card = Array.from(container.querySelectorAll('[data-testid="runtime-card"]')).find(
+      (candidate) => candidate.textContent?.includes('Python 3.12 (managed)')
+    )
+    expect(card?.querySelector('[role="progressbar"]')).not.toBeNull()
+    expect(card?.querySelector('[data-testid="runtime-packages-button"]')).toHaveProperty(
+      'disabled',
+      true
+    )
+    expect(
+      card?.querySelector<HTMLElement>('[aria-label="Enable Python 3.12 (managed)"]')
+    ).toHaveProperty('disabled', true)
+    expect(
+      Array.from(container.querySelectorAll('button')).find((button) =>
+        /^recheck$/i.test((button.textContent ?? '').trim())
+      )
+    ).toHaveProperty('disabled', true)
+    expect(card?.textContent).toContain('Reinstalling…')
+    expect(card?.querySelector('[data-testid="runtime-reinstall-cancel-python"]')).toBeNull()
+    resolveRepair?.()
+    await act(async () => {})
+    await act(async () => {})
+  })
+
+  it('keeps a failed reinstall out of Ready and leaves a retry action', async () => {
+    repairBridge.mockRejectedValueOnce(new Error('verification failed'))
+    await render()
+    await click(container.querySelector('[data-testid="runtime-reinstall-python"]'))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((button) =>
+          /reinstall runtime/i.test(button.textContent ?? '')
+        )
+      : null
+    await click(confirmBtn ?? null)
+
+    const card = Array.from(container.querySelectorAll('[data-testid="runtime-card"]')).find(
+      (candidate) => candidate.textContent?.includes('Python 3.12 (managed)')
+    )
+    expect(card?.querySelector('[data-testid="runtime-operation-error-python"]')?.textContent).toBe(
+      'verification failed'
+    )
+    expect(card?.querySelector('.lucide-circle-check')).toBeNull()
+    expect(card?.textContent).not.toContain('Ready')
+    expect(card?.querySelector('[data-testid="runtime-reinstall-python"]')).not.toBeNull()
+  })
+
   it('does not offer package-install authorization for an agent-created environment', async () => {
     const agentCreated: DiscoveredInterpreter = {
       language: 'python',
@@ -594,7 +761,16 @@ describe('RuntimesPanel', () => {
     expect(resetBtn).toBeDefined()
     expect(resetBtn?.getAttribute('data-variant')).toBe('default')
     await click(resetBtn ?? null)
-    expect(repairBridge).toHaveBeenCalledWith('r', expect.any(String))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    expect(dialog?.textContent).toContain('Reset R?')
+    expect(dialog?.textContent).toContain('Active Notebook kernels will be stopped')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((b) =>
+          /^reset runtime$/i.test((b.textContent ?? '').trim())
+        )
+      : null
+    await click(confirmBtn ?? null)
+    expect(repairBridge).toHaveBeenCalledWith('r', 'default-r', expect.any(String))
   })
 
   it('surfaces Reset even when a runnable managed env is still present (interrupted upgrade/install)', async () => {
@@ -620,7 +796,19 @@ describe('RuntimesPanel', () => {
     expect(resetBtn).toBeDefined()
     expect(resetBtn?.getAttribute('data-variant')).toBe('default')
     await click(resetBtn ?? null)
-    expect(repairBridge).toHaveBeenCalledWith('python', expect.any(String))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    expect(dialog?.textContent).toContain('Reset Python 3.12 (managed)?')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((b) =>
+          /^reset runtime$/i.test((b.textContent ?? '').trim())
+        )
+      : null
+    await click(confirmBtn ?? null)
+    expect(repairBridge).toHaveBeenCalledWith(
+      'python',
+      '/data/runtime/envs/default-python-3.12/bin/python',
+      expect.any(String)
+    )
   })
 
   it('keeps Cancel clickable while a real Download-and-set-up is in flight (not locked by busy)', async () => {
@@ -660,7 +848,8 @@ describe('RuntimesPanel', () => {
       interpreterPath: '/data/runtime/envs/default-r/bin/R',
       label: 'R 4.4.3 (managed)',
       version: '4.4.3',
-      runnable: true
+      runnable: true,
+      condaEnv: 'default-r'
     }
     provision.mockResolvedValue(undefined)
     listEnvironments.mockResolvedValueOnce({ python: pythonEnvs, r: rEnvs }).mockImplementationOnce(

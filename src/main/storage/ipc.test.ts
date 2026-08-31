@@ -1948,7 +1948,8 @@ describe('storage IPC handlers', () => {
     await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
       kind: 'move',
       dataRoot: target,
-      targetWasAbsent: true
+      targetWasAbsent: true,
+      targetAvailableBytes: expect.any(Number)
     })
   })
 
@@ -1960,7 +1961,30 @@ describe('storage IPC handlers', () => {
     await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
       kind: 'move',
       dataRoot: target,
-      targetWasAbsent: false
+      targetWasAbsent: false,
+      targetAvailableBytes: expect.any(Number)
+    })
+  })
+
+  it('inspects a missing target using its parent filesystem capacity and omits failed probes', async () => {
+    initDataRoot(dataRoot)
+    const availableBytes = vi.fn().mockResolvedValue(123_456)
+    const deps = fakeDeps({ availableBytes })
+    registerStorageIpcHandlers(deps)
+
+    await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
+      kind: 'move',
+      dataRoot: target,
+      targetWasAbsent: true,
+      targetAvailableBytes: 123_456
+    })
+    expect(availableBytes).toHaveBeenCalledWith(targetParent)
+
+    availableBytes.mockRejectedValueOnce(new Error('statfs unavailable'))
+    await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
+      kind: 'move',
+      dataRoot: target,
+      targetWasAbsent: true
     })
   })
 
@@ -1973,7 +1997,8 @@ describe('storage IPC handlers', () => {
     await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
       kind: 'move',
       dataRoot: target,
-      targetWasAbsent: true
+      targetWasAbsent: true,
+      targetAvailableBytes: expect.any(Number)
     })
     await expect(
       invoke('storage:set-data-root-and-relaunch', { parent: targetParent })
@@ -1987,12 +2012,16 @@ describe('storage IPC handlers', () => {
   it('inspect-data-root returns adopt when the derived target already holds our data', async () => {
     initDataRoot(dataRoot)
     await mkdir(join(target, 'artifacts'), { recursive: true })
-    registerStorageIpcHandlers(fakeDeps())
+    const availableBytes = vi.fn().mockResolvedValue(654_321)
+    const deps = fakeDeps({ availableBytes })
+    registerStorageIpcHandlers(deps)
 
     await expect(invoke('storage:inspect-data-root', { parent: targetParent })).resolves.toEqual({
       kind: 'adopt',
-      dataRoot: target
+      dataRoot: target,
+      targetAvailableBytes: 654_321
     })
+    expect(availableBytes).toHaveBeenCalledWith(target)
   })
 
   it('inspect-data-root returns invalid with a reason and the derived dataRoot for an unusable parent', async () => {

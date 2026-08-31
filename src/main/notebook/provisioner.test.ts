@@ -2311,6 +2311,28 @@ describe('DefaultRuntimeProvisioner prefix-block self-guard (startup gate path)'
     expect(runArgv).toHaveBeenCalled()
   })
 
+  it.each([
+    ['python', DEFAULT_PY_ENV, readReadyMarker, pythonBin],
+    ['r', DEFAULT_R_ENV, readRReadyMarker, rBin]
+  ] as const)(
+    'removes the %s ready marker when repaired binding finalization fails',
+    async (language, environment, readMarker, interpreterFor) => {
+      const root = makeRoot()
+      const provisioner = new DefaultRuntimeProvisioner(makeDeps(root))
+
+      await expect(
+        provisioner.repair(language, () => {}, {
+          onVerified: () => {
+            throw new Error('binding persist failed')
+          }
+        })
+      ).rejects.toThrow('binding persist failed')
+
+      expect(readMarker(root)).toBeUndefined()
+      expect(existsSync(interpreterFor(envPrefix(root, environment)))).toBe(true)
+    }
+  )
+
   const BOOT_A = '11111111-1111-4111-8111-111111111111'
   const BOOT_B = '22222222-2222-4222-8222-222222222222'
   // Writes a {spawning} sidecar with a chosen boot_id, deterministically (recordSpawnIntentSync would

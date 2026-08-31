@@ -1060,7 +1060,19 @@ export class DefaultRuntimeProvisioner implements RuntimeProvisioner {
             rmSync(rReadyMarkerPath(this.deps.root), { force: true })
             await this.doProvisionR(onProgress)
           }
-          await opts?.onVerified?.()
+          try {
+            await opts?.onVerified?.()
+          } catch (error) {
+            // Verification succeeded, but the repaired runtime is not usable until stale bindings are
+            // durably replaced. Keep lifecycle readiness fail-closed so startup/Reset can recover.
+            rmSync(
+              lang === 'python'
+                ? readyMarkerPath(this.deps.root)
+                : rReadyMarkerPath(this.deps.root),
+              { force: true }
+            )
+            throw error
+          }
         } finally {
           this.uninterruptible.delete(lang)
         }

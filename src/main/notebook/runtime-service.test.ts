@@ -5180,6 +5180,16 @@ describe('notebook runtime service', () => {
 
     it('rechecks a stale repair rejection after a queued run acquires the repaired environment', async () => {
       const root = await createStorageRoot()
+      const repairedPython: DiscoveredInterpreter = {
+        language: 'python',
+        provenance: 'app-managed',
+        envId: pythonBin(envPrefix(getRuntimeRoot(root), DEFAULT_PY_ENV)),
+        interpreterPath: pythonBin(envPrefix(getRuntimeRoot(root), DEFAULT_PY_ENV)),
+        label: DEFAULT_PY_ENV,
+        version: '3.12.0',
+        runnable: true,
+        condaEnv: DEFAULT_PY_ENV
+      }
       const firstStarted = createDeferred<void>()
       const releaseFirst = createDeferred<void>()
       const executions: string[] = []
@@ -5188,6 +5198,7 @@ describe('notebook runtime service', () => {
         dataRoot: root,
         projectId: 'default-project',
         repository: new NotebookRunRepository(root),
+        discoverRuntimes: async (language) => (language === 'python' ? [repairedPython] : []),
         executorFactory: () => ({
           execute: async (request): Promise<NotebookExecutionResult> => {
             executions.push(request.code)
@@ -5254,12 +5265,23 @@ describe('notebook runtime service', () => {
         version: '3.13.2',
         runnable: true
       }
+      const repairedPython: DiscoveredInterpreter = {
+        language: 'python',
+        provenance: 'app-managed',
+        envId: pythonBin(envPrefix(getRuntimeRoot(root), DEFAULT_PY_ENV)),
+        interpreterPath: pythonBin(envPrefix(getRuntimeRoot(root), DEFAULT_PY_ENV)),
+        label: DEFAULT_PY_ENV,
+        version: '3.12.0',
+        runnable: true,
+        condaEnv: DEFAULT_PY_ENV
+      }
       const service = new NotebookRuntimeService({
         configRoot: root,
         dataRoot: root,
         projectId: 'default-project',
         repository: new NotebookRunRepository(root),
-        discoverRuntimes: async (language) => (language === 'python' ? [externalRuntime] : []),
+        discoverRuntimes: async (language) =>
+          language === 'python' ? [repairedPython, externalRuntime] : [],
         notebookRuntimeSettings: {
           getSnapshot: async (language) => ({
             language,
@@ -7300,7 +7322,8 @@ describe('v4 runtime bindings & agent tools', () => {
     interpreterPath: '/root/runtime/envs/default-python/bin/python',
     label: 'default-python',
     version: '3.12.0',
-    runnable: true
+    runnable: true,
+    condaEnv: DEFAULT_PY_ENV
   }
   const userPyA: DiscoveredInterpreter = {
     language: 'python',
@@ -7327,7 +7350,8 @@ describe('v4 runtime bindings & agent tools', () => {
     interpreterPath: '/root/runtime/envs/default-r/bin/R',
     label: 'default-r',
     version: '4.3.1',
-    runnable: true
+    runnable: true,
+    condaEnv: DEFAULT_R_ENV
   }
   const userR: DiscoveredInterpreter = {
     language: 'r',
@@ -7413,6 +7437,74 @@ describe('v4 runtime bindings & agent tools', () => {
           })
       })
     })
+
+  it('prepares a healthy managed Python reinstall by closing explicit and implicit kernels', async () => {
+    const root = await createStorageRoot()
+    const terminations: string[] = []
+    const service = bindingService(root, { discovered: [managedPy], terminations })
+
+    await service.execute({ sessionId: 'implicit', workspaceCwd: root, code: '1' })
+    await service.bindRuntime({
+      sessionId: 'explicit',
+      workspaceCwd: root,
+      language: 'python',
+      runtimeId: managedPy.envId
+    })
+    await service.execute({ sessionId: 'explicit', workspaceCwd: root, code: '2' })
+
+    await service.prepareRuntimeRepair('python', managedPy.envId)
+
+    expect(terminations).toEqual(['python:default-python', 'python:default-python'])
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
+    const quarantined = await service.state({
+      sessionId: 'explicit',
+      workspaceCwd: root
+    })
+    expect(quarantined.runtimeBindings.python).toMatchObject({
+      status: 'unavailable',
+      reason: 'repair-required'
+    })
+
+    await service.completeRuntimeRepair('python')
+
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(false)
+    const repaired = await service.state({ sessionId: 'explicit', workspaceCwd: root })
+    expect(repaired.runtimeBindings.python).toMatchObject({
+      runtimeId: managedPy.envId,
+      status: 'active'
+    })
+  })
+
+  it('accepts a healthy managed R default and rejects external or legacy managed identities', async () => {
+    const root = await createStorageRoot()
+    const service = bindingService(root, { discovered: [managedR, userPyA] })
+
+    await service.prepareRuntimeRepair('r', managedR.envId)
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_R_ENV)).toBe(true)
+    await service.completeRuntimeRepair('r')
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_R_ENV)).toBe(false)
+
+    await expect(service.prepareRuntimeRepair('python', userPyA.envId)).rejects.toThrow(
+      /no longer the app-managed python default/i
+    )
+
+    const legacy: DiscoveredInterpreter = {
+      ...managedPy,
+      envId: '/root/runtime/envs/default-python-legacy/bin/python',
+      interpreterPath: '/root/runtime/envs/default-python-legacy/bin/python',
+      condaEnv: 'default-python-legacy'
+    }
+    const legacyService = bindingService(root, { discovered: [legacy] })
+    await expect(legacyService.prepareRuntimeRepair('python', legacy.envId)).rejects.toThrow(
+      /no longer the app-managed python default/i
+    )
+
+    addRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV, 'protected-identity-change')
+    const recoveryService = bindingService(root, { discovered: [] })
+    await expect(
+      recoveryService.prepareRuntimeRepair('python', DEFAULT_PY_ENV)
+    ).resolves.toBeUndefined()
+  })
 
   it('list_notebook_runtimes returns only enabled runtimes (never disabled), flagging the binding', async () => {
     const root = await createStorageRoot()
@@ -10328,6 +10420,59 @@ describe('v4 runtime bindings & agent tools', () => {
       status: 'failed',
       text: { traceback: 'ordinary kernel failure' }
     })
+  })
+
+  it('managed reinstall aborts an executing default-runtime cell before prefix mutation', async () => {
+    const root = await createStorageRoot()
+    let resolveRun: ((result: NotebookExecutionResult) => void) | undefined
+    const service = new NotebookRuntimeService({
+      configRoot: root,
+      dataRoot: root,
+      projectId: 'default-project',
+      repository: new NotebookRunRepository(root),
+      discoverRuntimes: async (language) => (language === 'python' ? [managedPy] : []),
+      notebookRuntimeSettings: {
+        getSnapshot: async (language) => ({
+          language,
+          runtimeEnablement: { enabled: {}, installAuthorized: {} },
+          manualInterpreters: [],
+          packageMirror: {}
+        })
+      },
+      executorFactory: () => ({
+        execute: () =>
+          new Promise<NotebookExecutionResult>((resolve) => {
+            resolveRun = resolve
+          }),
+        shutdown: async () => ({ reaped: true }),
+        terminate: async () => {
+          // The real NotebookKernelExecutor catches its rejected pending request and resolves execute()
+          // with a failed result. Reinstall still owns the terminal classification and records cancelled.
+          resolveRun?.({
+            status: 'failed',
+            kernelDispatched: true,
+            stdout: '',
+            stderr: 'kernel killed for reinstall',
+            traceback: 'kernel killed for reinstall',
+            cwdAfter: root,
+            outputs: []
+          })
+          resolveRun = undefined
+        }
+      })
+    })
+    const run = service.execute({
+      sessionId: 's',
+      workspaceCwd: root,
+      code: 'long_running()',
+      language: 'python'
+    })
+    await vi.waitFor(() => expect(resolveRun).toBeDefined())
+
+    await service.prepareRuntimeRepair('python', managedPy.envId)
+
+    await expect(run).resolves.toMatchObject({ status: 'cancelled' })
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
   })
 
   it('persists a binding and restores it active on a fresh service (WS1-rest/WS12 boot revalidation)', async () => {

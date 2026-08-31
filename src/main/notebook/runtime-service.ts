@@ -474,6 +474,8 @@ class NotebookRuntimeService {
       environmentOperations: this.environmentOperations,
       sessions: () => this.sessions.values(),
       findSession: (sessionId) => this.sessions.get(this.sessionLifecycle.rootLane(sessionId)),
+      clearKernelTermination: (session, processKey) =>
+        this.sessionLifecycle.clearPersistedKernelTermination(session, processKey),
       notifyChanged: (session) => this.sessionLifecycle.notifyChanged(session)
     })
     this.environmentManagement = new NotebookEnvironmentManagementOwner({
@@ -1237,11 +1239,30 @@ class NotebookRuntimeService {
     this.recoveryCoordinator.clearRuntimeBlock(runtimeId)
   }
 
+  async prepareRuntimeRepair(language: NotebookLanguage, runtimeIdentity: string): Promise<void> {
+    const environment = this.defaultEnvNameFor(language)
+    let binding: InternalRuntimeBinding | undefined
+    if (runtimeIdentity === environment) {
+      if (
+        !this.isDefaultEnvRecoveryBlocked(language) &&
+        !this.repairPolicy.requirement(language, environment).required
+      ) {
+        throw new Error(
+          `The selected runtime is no longer the app-managed ${language} default. Recheck runtimes and try again.`
+        )
+      }
+    } else {
+      binding = await this.runtimeBindingOwner.requireManagedDefault(language, runtimeIdentity)
+    }
+    await this.runtimeRepair.prepareExplicitRepair(language, binding)
+  }
+
   // Called only after the explicit UI Runtime Reset has rebuilt and verified the managed default env.
   // This is deliberately separate from managePackages(): an ordinary install may clear an
   // interrupted-install marker, but it must never release a protected-identity quarantine.
   async completeRuntimeRepair(language: NotebookLanguage): Promise<void> {
-    await this.runtimeRepair.completeExplicitRepair(language)
+    const replacement = await this.runtimeBindingOwner.requireManagedDefault(language)
+    await this.runtimeRepair.completeExplicitRepair(language, replacement)
   }
 
   // Releases ONE prefix from the global corrupt-journal write barrier. Called by a force Reset (via the

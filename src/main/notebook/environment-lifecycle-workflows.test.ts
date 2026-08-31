@@ -53,6 +53,7 @@ const createLifecycle = (
     projectProgress?: (progress: ProvisionProgress) => void
     waitForRecovery?: () => Promise<void>
     assertProvisionAllowed?: (language: 'python' | 'r') => void
+    onRepairStarting?: (language: 'python' | 'r', runtimeIdentity: string) => Promise<void> | void
     onRepairCompleted?: (language: 'python' | 'r') => Promise<void> | void
   } = {}
 ): NotebookEnvironmentLifecycle =>
@@ -62,6 +63,7 @@ const createLifecycle = (
     projectProgress: options.projectProgress ?? (() => undefined),
     waitForRecovery: options.waitForRecovery,
     assertProvisionAllowed: options.assertProvisionAllowed,
+    onRepairStarting: options.onRepairStarting,
     onRepairCompleted: options.onRepairCompleted
   })
 
@@ -106,7 +108,9 @@ describe('createNotebookEnvironmentLifecycle', () => {
     const lifecycle = createLifecycle(provisioner)
 
     await expect(lifecycle.provision('julia' as 'python')).rejects.toThrow(/python or r/i)
-    await expect(lifecycle.repair('julia' as 'python')).rejects.toThrow(/python or r/i)
+    await expect(lifecycle.repair('julia' as 'python', 'default-python')).rejects.toThrow(
+      /python or r/i
+    )
     expect(() => lifecycle.cancel('julia' as 'python')).toThrow(/python or r/i)
     expect(provisioner.provisionPython).not.toHaveBeenCalled()
     expect(provisioner.provisionR).not.toHaveBeenCalled()
@@ -143,7 +147,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
   it('repair delegates by language as an explicit force-recovery', async () => {
     const provisioner = fakeProvisioner()
     const lifecycle = createLifecycle(provisioner)
-    await lifecycle.repair('r')
+    await lifecycle.repair('r', 'default-r')
     // UI repair is the user's Reset: it force-clears the quarantine (force: true).
     expect(provisioner.repair).toHaveBeenCalledWith('r', expect.any(Function), {
       force: true,
@@ -151,12 +155,42 @@ describe('createNotebookEnvironmentLifecycle', () => {
     })
   })
 
+  it('coordinates the selected runtime before entering destructive repair', async () => {
+    const order: string[] = []
+    const provisioner = fakeProvisioner({
+      repair: vi.fn(async () => {
+        order.push('repair')
+      })
+    })
+    const lifecycle = createLifecycle(provisioner, {
+      onRepairStarting: async (language, runtimeIdentity) => {
+        order.push(`prepare:${language}:${runtimeIdentity}`)
+      }
+    })
+
+    await lifecycle.repair('python', '/runtime/default-python/python')
+
+    expect(order).toEqual(['prepare:python:/runtime/default-python/python', 'repair'])
+  })
+
+  it('does not enter destructive repair when runtime coordination fails', async () => {
+    const provisioner = fakeProvisioner()
+    const lifecycle = createLifecycle(provisioner, {
+      onRepairStarting: async () => {
+        throw new Error('binding persist denied')
+      }
+    })
+
+    await expect(lifecycle.repair('r', 'default-r')).rejects.toThrow('binding persist denied')
+    expect(provisioner.repair).not.toHaveBeenCalled()
+  })
+
   it('publishes a successful verified repair back to the runtime service', async () => {
     const provisioner = fakeProvisioner()
     const onRepairCompleted = vi.fn().mockResolvedValue(undefined)
     const lifecycle = createLifecycle(provisioner, { onRepairCompleted })
 
-    await lifecycle.repair('r')
+    await lifecycle.repair('r', 'default-r')
 
     expect(onRepairCompleted).toHaveBeenCalledOnce()
     expect(onRepairCompleted).toHaveBeenCalledWith('r')
@@ -177,7 +211,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
       }
     })
 
-    await lifecycle.repair('python')
+    await lifecycle.repair('python', 'default-python')
 
     expect(order).toEqual(['lock:enter', 'repair:completed', 'lock:exit'])
   })
@@ -189,7 +223,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
     const onRepairCompleted = vi.fn().mockResolvedValue(undefined)
     const lifecycle = createLifecycle(provisioner, { onRepairCompleted })
 
-    await expect(lifecycle.repair('r')).rejects.toThrow('verification failed')
+    await expect(lifecycle.repair('r', 'default-r')).rejects.toThrow('verification failed')
     expect(onRepairCompleted).not.toHaveBeenCalled()
   })
 
@@ -199,7 +233,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
     beginMigration()
 
     await expect(lifecycle.provision('python')).rejects.toThrow(/moving your data/i)
-    await expect(lifecycle.repair('r')).rejects.toThrow(/moving your data/i)
+    await expect(lifecycle.repair('r', 'default-r')).rejects.toThrow(/moving your data/i)
     expect(provisioner.provisionPython).not.toHaveBeenCalled()
     expect(provisioner.repair).not.toHaveBeenCalled()
   })
@@ -234,7 +268,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
       )
     })
     const lifecycle = createLifecycle(provisioner)
-    const operation = lifecycle.repair('python')
+    const operation = lifecycle.repair('python', 'default-python')
     lifecycle.cancel('python')
     expect(provisioner.cancel).toHaveBeenCalledWith('python')
     settleRepair()
@@ -336,7 +370,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
       order.push('recovery')
     })
     const lifecycle = createLifecycle(provisioner, { waitForRecovery })
-    await lifecycle.repair('python')
+    await lifecycle.repair('python', 'default-python')
     expect(order).toEqual(['recovery', 'repair'])
   })
 
@@ -357,7 +391,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
     expect(provisioner.provisionPython).not.toHaveBeenCalled()
 
     // Repair (the Reset entry) proceeds — it's the recovery, so it force-clears rather than refusing.
-    await lifecycle.repair('python')
+    await lifecycle.repair('python', 'default-python')
     expect(provisioner.repair).toHaveBeenCalledWith('python', expect.any(Function), {
       force: true,
       onVerified: expect.any(Function)
@@ -419,7 +453,7 @@ describe('createNotebookEnvironmentLifecycle', () => {
     const lifecycle = createLifecycle(provisioner)
 
     const first = lifecycle.provision('python')
-    const second = lifecycle.repair('python')
+    const second = lifecycle.repair('python', 'default-python')
 
     await Promise.resolve()
     await Promise.resolve()
@@ -444,7 +478,7 @@ describe('environment lifecycle command projection', () => {
     const status = await lifecycle.status()
     expect(status).toMatchObject({ pythonReady: false, rReady: false, provisioning: false })
     await expect(lifecycle.provision('python')).rejects.toThrow(/micromamba/i)
-    await expect(lifecycle.repair('python')).rejects.toThrow(/micromamba/i)
+    await expect(lifecycle.repair('python', 'default-python')).rejects.toThrow(/micromamba/i)
     expect(lifecycle.cancel('python')).toBeUndefined()
     await expect(lifecycle.startup()).resolves.toBeUndefined()
   })
@@ -490,7 +524,7 @@ describe('environment lifecycle command projection', () => {
     })
 
     await lifecycle.provision('r')
-    await lifecycle.repair('python')
+    await lifecycle.repair('python', 'default-python')
 
     expect(projected).toEqual([
       { phase: 'fetch-r', message: 'Downloading R', progress: 0.4, scope: 'r' },

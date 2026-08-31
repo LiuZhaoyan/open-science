@@ -28,11 +28,12 @@ type NotebookRuntimeRepairOwnerOptions = {
   policy: Pick<NotebookRuntimeRepairPolicy, 'blockKey' | 'registryKeys'>
   bindings: Pick<
     NotebookRuntimeBindingOwner,
-    'runWrites' | 'markUnavailable' | 'markAvailable' | 'persist'
+    'runWrites' | 'markUnavailable' | 'markAvailable' | 'persist' | 'persistStrict'
   >
   environmentOperations: Pick<NotebookEnvironmentOperations, 'blockRepair' | 'clearRepair'>
   sessions: () => Iterable<RepairSession>
   findSession: (sessionId: string) => RepairSession | undefined
+  clearKernelTermination: (session: RepairSession, processKey: string) => Promise<void>
   notifyChanged: (session: RepairSession) => void
 }
 
@@ -45,6 +46,44 @@ const processKey = (language: NotebookLanguage, environment: string): string =>
 /** Owns runtime quarantine and repaired-binding restoration without exposing Session state. */
 class NotebookRuntimeRepairOwner {
   constructor(private readonly options: NotebookRuntimeRepairOwnerOptions) {}
+
+  async prepareExplicitRepair(
+    language: NotebookLanguage,
+    binding?: NotebookSessionRuntimeBinding
+  ): Promise<void> {
+    const environmentName = defaultEnvironment(language)
+    const target = { language, environmentName, binding } satisfies RuntimeRepairTarget
+    const sessions = this.matchingSessions(target, false)
+    this.options.environmentOperations.blockRepair(this.blockKey(target))
+    addRepairRequired(this.options.runtimeRoot, environmentName, 'protected-identity-change')
+
+    await this.options.bindings.runWrites(
+      sessions.map((session) => session.sessionId),
+      async () => {
+        const changed: RepairSession[] = []
+        for (const session of sessions) {
+          if (this.options.findSession(session.sessionId) !== session) continue
+          if (
+            session.runtimeBinding(language) &&
+            this.options.bindings.markUnavailable(session, language, 'repair-required')
+          ) {
+            changed.push(session)
+          }
+        }
+        for (const session of changed) await this.options.bindings.persistStrict(session)
+
+        for (const session of sessions) {
+          if (this.options.findSession(session.sessionId) !== session) continue
+          const key = processKey(language, environmentName)
+          if (session.kernelStatus(key) === 'running') session.markForceStopped(key)
+          await session.terminateExecutor(language === 'r' ? 'r' : 'python', environmentName)
+          await this.options.clearKernelTermination(session, key)
+          session.clearProcessState(key)
+          this.options.notifyChanged(session)
+        }
+      }
+    )
+  }
 
   async quarantineProtectedIdentity(target: NotebookPackageAdmittedTarget): Promise<void> {
     const repairTarget = this.target(target)
@@ -128,7 +167,10 @@ class NotebookRuntimeRepairOwner {
     await this.restoreBindings(repairTarget, false)
   }
 
-  async completeExplicitRepair(language: NotebookLanguage): Promise<void> {
+  async completeExplicitRepair(
+    language: NotebookLanguage,
+    replacement: NotebookSessionRuntimeBinding
+  ): Promise<void> {
     const environmentName = defaultEnvironment(language)
     const target = { language, environmentName } satisfies RuntimeRepairTarget
     const aliases = new Set<string>()
@@ -143,7 +185,29 @@ class NotebookRuntimeRepairOwner {
       }
     }
 
-    // Keep the primary durable gate armed until every compatibility alias has been cleared.
+    const sessions = this.matchingSessions(target, false).filter((session) =>
+      Boolean(session.runtimeBinding(language))
+    )
+    await this.options.bindings.runWrites(
+      sessions.map((session) => session.sessionId),
+      async () => {
+        for (const session of sessions) {
+          if (this.options.findSession(session.sessionId) !== session) continue
+          const previous = session.runtimeBinding(language)
+          if (!previous) continue
+          session.setRuntimeBinding(language, replacement)
+          try {
+            await this.options.bindings.persistStrict(session)
+          } catch (error) {
+            session.setRuntimeBinding(language, previous)
+            throw error
+          }
+        }
+      }
+    )
+
+    // Keep the primary durable gate armed until refreshed bindings are durable and every compatibility
+    // alias has been cleared. If any step fails, execution remains blocked and Reset can be retried.
     aliases.delete(environmentName)
     for (const alias of aliases) clearRepairRequired(this.options.runtimeRoot, alias)
     clearRepairRequired(this.options.runtimeRoot, environmentName)
@@ -152,7 +216,7 @@ class NotebookRuntimeRepairOwner {
         this.options.policy.blockKey(affectedLanguage, environmentName)
       )
     }
-    await this.restoreBindings(target, true)
+    for (const session of sessions) this.options.notifyChanged(session)
   }
 
   completeRemovedManagedEnvironment(environmentName: string): void {

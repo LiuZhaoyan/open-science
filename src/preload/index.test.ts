@@ -123,7 +123,7 @@ type PreloadApi = {
   notebookEnv: {
     cancel: (language?: unknown) => unknown
     provision: (language: unknown, operationId?: unknown) => unknown
-    repair: (language: unknown, operationId?: unknown) => unknown
+    repair: (language: unknown, runtimeIdentity: unknown, operationId?: unknown) => unknown
   }
   notifications: {
     peekPendingOpenSession: () => unknown
@@ -766,7 +766,7 @@ describe('preload bridge — runtime renderer contract catalog', () => {
     await api.notebookEnv.cancel()
     await api.notebookEnv.cancel(undefined)
     await api.notebookEnv.provision('r', 'provision-operation')
-    await api.notebookEnv.repair('python', 'repair-operation')
+    await api.notebookEnv.repair('python', 'default-python', 'repair-operation')
 
     expect(invokeMock).toHaveBeenNthCalledWith(1, 'acp:connect', {})
     expect(invokeMock).toHaveBeenNthCalledWith(2, 'acp:connect', {})
@@ -782,6 +782,7 @@ describe('preload bridge — runtime renderer contract catalog', () => {
       6,
       'notebook-env:repair',
       'python',
+      'default-python',
       'repair-operation'
     )
   })
