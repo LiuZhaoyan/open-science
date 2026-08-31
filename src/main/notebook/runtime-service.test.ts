@@ -7506,6 +7506,20 @@ describe('v4 runtime bindings & agent tools', () => {
     ).resolves.toBeUndefined()
   })
 
+  it('accepts the exact discovered managed default when its interpreter is broken', async () => {
+    const root = await createStorageRoot()
+    const brokenManagedPython: DiscoveredInterpreter = {
+      ...managedPy,
+      runnable: false
+    }
+    const service = bindingService(root, { discovered: [brokenManagedPython] })
+
+    await expect(
+      service.prepareRuntimeRepair('python', brokenManagedPython.envId)
+    ).resolves.toBeUndefined()
+    expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
+  })
+
   it('list_notebook_runtimes returns only enabled runtimes (never disabled), flagging the binding', async () => {
     const root = await createStorageRoot()
     // No enablement override: user-own defaults OFF, app-managed defaults ON.
@@ -10515,6 +10529,90 @@ describe('v4 runtime bindings & agent tools', () => {
     expect(state.runtimeBindings.python?.runtimeId).toBe(userPyA.envId)
     expect(state.runtimeBindings.python?.status).toBe('unavailable')
     expect(state.runtimeBindings.python?.reason).toBe('disabled')
+  })
+
+  it('migrates persisted Windows legacy default bindings to the current managed prefixes', async () => {
+    const root = await createStorageRoot()
+    const repository = new NotebookRunRepository(root)
+    const sessionId = 'legacy-defaults'
+    const lane = createRootNotebookLane('default-project', sessionId, `root-frame-${sessionId}`)
+    const runtimeRoot = getRuntimeRoot(root)
+    const legacyPython = join(runtimeRoot, 'envs', DEFAULT_PY_ENV, 'python.exe')
+    const legacyR = join(runtimeRoot, 'envs', DEFAULT_R_ENV, 'Lib', 'R', 'bin', 'R.exe')
+    const currentPython = join(runtimeRoot, 'envs', '.p', 'python.exe')
+    const currentR = join(runtimeRoot, 'envs', '.r', 'Lib', 'R', 'bin', 'R.exe')
+
+    await repository.loadOrCreate({
+      projectId: 'default-project',
+      sessionId,
+      workspaceCwd: root,
+      lane
+    })
+    await repository.setRuntimeBindings(
+      'default-project',
+      sessionId,
+      {
+        python: {
+          language: 'python',
+          runtimeId: legacyPython,
+          source: 'managed',
+          provenance: 'app-managed',
+          interpreterPath: legacyPython,
+          label: 'Python (managed)',
+          status: 'active'
+        },
+        r: {
+          language: 'r',
+          runtimeId: legacyR,
+          source: 'managed',
+          provenance: 'app-managed',
+          interpreterPath: legacyR,
+          label: 'R (managed)',
+          status: 'active'
+        }
+      },
+      lane
+    )
+
+    const service = bindingService(root, {
+      platform: 'win32',
+      repository,
+      discovered: [
+        {
+          language: 'python',
+          provenance: 'app-managed',
+          envId: currentPython,
+          interpreterPath: currentPython,
+          label: 'Python (managed)',
+          version: '3.12.4',
+          runnable: true,
+          condaEnv: DEFAULT_PY_ENV
+        },
+        {
+          language: 'r',
+          provenance: 'app-managed',
+          envId: currentR,
+          interpreterPath: currentR,
+          label: 'R (managed)',
+          version: '4.4.1',
+          runnable: true,
+          condaEnv: DEFAULT_R_ENV
+        }
+      ]
+    })
+
+    const state = await service.state({ sessionId, workspaceCwd: root })
+    expect(state.runtimeBindings.python?.runtimeId).toBe(currentPython)
+    expect(state.runtimeBindings.r?.runtimeId).toBe(currentR)
+
+    const persisted = await repository.loadOrCreate({
+      projectId: 'default-project',
+      sessionId,
+      workspaceCwd: root,
+      lane
+    })
+    expect(persisted.runtimeBindings?.python?.runtimeId).toBe(currentPython)
+    expect(persisted.runtimeBindings?.r?.runtimeId).toBe(currentR)
   })
 
   // WS9: certify the disable/binding lifecycle across the scenarios from the disable-binding spec.

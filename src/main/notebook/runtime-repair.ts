@@ -32,7 +32,7 @@ type NotebookRuntimeRepairOwnerOptions = {
   >
   environmentOperations: Pick<NotebookEnvironmentOperations, 'blockRepair' | 'clearRepair'>
   sessions: () => Iterable<RepairSession>
-  findSession: (sessionId: string) => RepairSession | undefined
+  isCurrentSession: (session: RepairSession) => boolean
   clearKernelTermination: (session: RepairSession, processKey: string) => Promise<void>
   notifyChanged: (session: RepairSession) => void
 }
@@ -62,7 +62,7 @@ class NotebookRuntimeRepairOwner {
       async () => {
         const changed: RepairSession[] = []
         for (const session of sessions) {
-          if (this.options.findSession(session.sessionId) !== session) continue
+          if (!this.options.isCurrentSession(session)) continue
           if (
             session.runtimeBinding(language) &&
             this.options.bindings.markUnavailable(session, language, 'repair-required')
@@ -73,7 +73,7 @@ class NotebookRuntimeRepairOwner {
         for (const session of changed) await this.options.bindings.persistStrict(session)
 
         for (const session of sessions) {
-          if (this.options.findSession(session.sessionId) !== session) continue
+          if (!this.options.isCurrentSession(session)) continue
           const key = processKey(language, environmentName)
           if (session.kernelStatus(key) === 'running') session.markForceStopped(key)
           await session.terminateExecutor(language === 'r' ? 'r' : 'python', environmentName)
@@ -107,7 +107,7 @@ class NotebookRuntimeRepairOwner {
         }
         try {
           for (const session of sessions) {
-            if (this.options.findSession(session.sessionId) !== session) continue
+            if (!this.options.isCurrentSession(session)) continue
             for (const language of languages) {
               if (!this.matches(session, language, repairTarget, managed)) continue
               if (
@@ -192,7 +192,7 @@ class NotebookRuntimeRepairOwner {
       sessions.map((session) => session.sessionId),
       async () => {
         for (const session of sessions) {
-          if (this.options.findSession(session.sessionId) !== session) continue
+          if (!this.options.isCurrentSession(session)) continue
           const previous = session.runtimeBinding(language)
           if (!previous) continue
           session.setRuntimeBinding(language, replacement)
@@ -310,7 +310,7 @@ class NotebookRuntimeRepairOwner {
       async () => {
         const changedSessions: RepairSession[] = []
         for (const session of sessions) {
-          if (this.options.findSession(session.sessionId) !== session) continue
+          if (!this.options.isCurrentSession(session)) continue
           let changed = false
           for (const [language, binding] of session.runtimeBindingEntries()) {
             if (

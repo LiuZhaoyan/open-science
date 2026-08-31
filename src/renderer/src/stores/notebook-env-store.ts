@@ -166,8 +166,8 @@ export const useNotebookEnvStore = create<NotebookEnvStore>((set, get) => {
       }
     }))
 
-  // Reflect the main-process recovery quarantine (ProvisionStatus.*RecoveryBlocked) into each language's
-  // slot, so a blocked-but-ready env surfaces the Reset affordance. Only manages the recovery message:
+  // Reflect the main-process recovery state (ProvisionStatus.*RecoveryBlocked) into each language's
+  // slot, so a quarantined or failed-repair env surfaces the Reset affordance. Only manages the message:
   // set it when blocked and not actively (re)building, clear only that specific message when unblocked —
   // never stomping a live rebuild's progress or an unrelated provision error.
   const applyRecoveryBlocks = (status: ProvisionStatus): void => {
@@ -347,10 +347,12 @@ export const useNotebookEnvStore = create<NotebookEnvStore>((set, get) => {
       let failure: string | undefined
       try {
         await bridge.repair(lang, runtimeIdentity, run.operationId)
-        status = await refreshStatus(bridge)
       } catch (e) {
         failure = errorText(e)
       } finally {
+        // A destructive repair can remove the discovered interpreter before rebuilding fails. Always
+        // refresh the authoritative status so its durable repair marker can surface Reset immediately.
+        status = await refreshStatus(bridge)
         const completion = endExplicitRun(lang, run)
         if (
           completion.last &&

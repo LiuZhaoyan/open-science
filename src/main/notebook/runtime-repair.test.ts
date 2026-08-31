@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { NotebookLanguage } from '../../shared/notebook'
 import type { NotebookPackageAdmittedTarget } from './package-admission'
-import { createRootNotebookLane } from './lane-identity'
+import { createFrameNotebookLane, createRootNotebookLane, notebookLaneKey } from './lane-identity'
 import {
   addRepairRequired,
   managedRepairRegistryKey,
@@ -46,13 +46,14 @@ const binding = (
 
 const session = (
   sessionId: string,
-  bindings: readonly NotebookSessionRuntimeBinding[] = []
+  bindings: readonly NotebookSessionRuntimeBinding[] = [],
+  lane = createRootNotebookLane('project', sessionId, 'root-frame-' + sessionId)
 ): { value: NotebookSessionAggregate; terminate: ReturnType<typeof vi.fn> } => {
   const terminate = vi.fn().mockResolvedValue(undefined)
   const value = new NotebookSessionAggregate({
     sessionId,
     projectId: 'project',
-    lane: createRootNotebookLane('project', sessionId, 'root-frame-' + sessionId),
+    lane,
     cwd: '/workspace',
     notebookSessionRoot: '/workspace',
     dataRoot: '/data',
@@ -121,7 +122,7 @@ const harness = (
 } => {
   const runtimeRoot = mkdtempSync(join(tmpdir(), 'notebook-runtime-repair-'))
   roots.push(runtimeRoot)
-  const byId = new Map(sessions.map((candidate) => [candidate.sessionId, candidate]))
+  const byLane = new Map(sessions.map((candidate) => [notebookLaneKey(candidate.lane), candidate]))
   const options: RepairOptions = {
     runtimeRoot,
     policy: new NotebookRuntimeRepairPolicy(runtimeRoot),
@@ -151,7 +152,7 @@ const harness = (
       clearRepair: vi.fn()
     },
     sessions: () => sessions,
-    findSession: (sessionId) => byId.get(sessionId),
+    isCurrentSession: (session) => byLane.get(notebookLaneKey(session.lane)) === session,
     clearKernelTermination: vi.fn().mockResolvedValue(undefined),
     notifyChanged: vi.fn()
   }
@@ -189,6 +190,29 @@ describe('NotebookRuntimeRepairOwner', () => {
     expect(implicit.value.consumeForceStopped('python:default-python')).toBe(false)
     expect(explicit.value.kernelStatus('python:default-python')).toBeUndefined()
     expect(implicit.value.kernelStatus('python:default-python')).toBeUndefined()
+  })
+
+  it('quarantines every live frame lane that shares an application Session', async () => {
+    const managed = binding(
+      'python',
+      '/runtime/envs/default-python/bin/python',
+      'managed',
+      'default-python'
+    )
+    const root = session('shared', [managed])
+    const delegated = session(
+      'shared',
+      [managed],
+      createFrameNotebookLane('project', 'shared', 'delegated-frame', 'attempt-1')
+    )
+    root.value.setKernelStatus('python:default-python', 'idle')
+    delegated.value.setKernelStatus('python:default-python', 'running')
+    const { owner } = harness([root.value, delegated.value])
+
+    await owner.prepareExplicitRepair('python', managed)
+
+    expect(root.terminate).toHaveBeenCalledWith('python', 'default-python')
+    expect(delegated.terminate).toHaveBeenCalledWith('python', 'default-python')
   })
 
   it('fails closed when pre-repair binding persistence cannot be confirmed', async () => {

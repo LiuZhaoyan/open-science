@@ -83,6 +83,7 @@ import {
   envPrefix,
   legacyDefaultEnvPrefix,
   logicalEnvNameFromDirectory,
+  isRepairRequired,
   needsRepair,
   pkgsCache,
   pythonBin,
@@ -869,16 +870,20 @@ export class DefaultRuntimeProvisioner implements RuntimeProvisioner {
 
   status(): ProvisionStatus {
     const marker = readReadyMarker(this.deps.root)
+    const recoveryBlocked = (environment: string): boolean | undefined => {
+      const blocked = this.deps.isPrefixBlocked?.(envPrefix(this.deps.root, environment))
+      return blocked === true || isRepairRequired(this.deps.root, environment) ? true : blocked
+    }
     return {
       pythonReady: pythonReady(this.deps.root, DEFAULT_ENV_VERSION),
       rReady: rReady(this.deps.root),
       version: marker?.defaultEnvVersion ?? 0,
       provisioning: this.provisioning,
       bundleSource: this.deps.bundleSource,
-      // Surface a recovery quarantine so the UI can offer Reset even when the interpreter/marker still
-      // read as ready (recovery blocks the prefix in memory without touching the marker).
-      pythonRecoveryBlocked: this.deps.isPrefixBlocked?.(envPrefix(this.deps.root, DEFAULT_PY_ENV)),
-      rRecoveryBlocked: this.deps.isPrefixBlocked?.(envPrefix(this.deps.root, DEFAULT_R_ENV))
+      // Surface both in-memory recovery quarantine and the durable explicit-repair marker so the UI
+      // offers Reset whether the interpreter still reads ready or the failed rebuild removed it.
+      pythonRecoveryBlocked: recoveryBlocked(DEFAULT_PY_ENV),
+      rRecoveryBlocked: recoveryBlocked(DEFAULT_R_ENV)
     }
   }
 

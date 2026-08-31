@@ -1,3 +1,5 @@
+import { join, win32 } from 'node:path'
+
 import type { NotebookLanguage } from '../../shared/notebook'
 import {
   isEnvEnabled,
@@ -18,7 +20,7 @@ import {
   windowsCondaPrefixForR
 } from './environment-discovery'
 import { getRuntimeRoot, type NotebookRunRepository } from './repository'
-import { DEFAULT_PY_ENV, DEFAULT_R_ENV } from './runtime-paths'
+import { DEFAULT_PY_ENV, DEFAULT_R_ENV, legacyDefaultEnvPrefix } from './runtime-paths'
 import { runtimeTargetReceipt } from './runtime-target'
 import type { NotebookRuntimeRepairPolicy } from './runtime-repair-policy'
 import type {
@@ -62,8 +64,12 @@ const admissionGate = (): AdmissionGate => {
   return { promise, release }
 }
 
-const defaultEnvironment = (language: NotebookLanguage): string =>
+const defaultEnvironment = (
+  language: NotebookLanguage
+): typeof DEFAULT_PY_ENV | typeof DEFAULT_R_ENV =>
   language === 'r' ? DEFAULT_R_ENV : DEFAULT_PY_ENV
+
+const windowsPathKey = (path: string): string => win32.normalize(path).toLowerCase()
 
 /** Owns Notebook runtime discovery, selection, binding transitions, and durable wire snapshots. */
 export class NotebookRuntimeBindingOwner {
@@ -380,7 +386,10 @@ export class NotebookRuntimeBindingOwner {
         env.condaEnv === environment &&
         (expectedRuntimeId === undefined || env.envId === expectedRuntimeId)
     )
-    if (!match || !match.runnable) {
+    // A user-triggered reinstall must accept the exact discovered app-managed default even when its
+    // interpreter is broken. The identity/provenance/env-name checks above still prove ownership;
+    // only post-repair discovery (no expectedRuntimeId) requires the replacement to be runnable.
+    if (!match || (expectedRuntimeId === undefined && !match.runnable)) {
       throw new Error(
         expectedRuntimeId === undefined
           ? `The app-managed ${language} runtime is not runnable.`
@@ -395,6 +404,7 @@ export class NotebookRuntimeBindingOwner {
     persisted: NotebookRuntimeBindings | undefined
   ): Promise<void> {
     if (!persisted) return
+    let migratedLegacyDefault = false
     for (const language of ['python', 'r'] as const) {
       const wire = persisted[language]
       if (!wire) continue
@@ -404,6 +414,12 @@ export class NotebookRuntimeBindingOwner {
           await this.resolveEnabledRuntime(language, wire.runtimeId)
         )
       } catch {
+        const migrated = await this.legacyManagedDefaultReplacement(language, wire)
+        if (migrated) {
+          session.setRuntimeBinding(language, migrated)
+          migratedLegacyDefault = true
+          continue
+        }
         const settings = await this.runtimeSettingsSnapshot(language)
         const discovered = await this.discover(language, settings?.manualInterpreters ?? [])
         const stillDetected = discovered.some((env) => env.envId === wire.runtimeId)
@@ -420,6 +436,56 @@ export class NotebookRuntimeBindingOwner {
         })
       }
     }
+    if (migratedLegacyDefault) {
+      // Persist once after both languages are restored so migrating one binding never temporarily
+      // drops the other. A later launch must not rediscover the removed legacy prefix as missing.
+      await this.persistStrict(session)
+    }
+  }
+
+  private async legacyManagedDefaultReplacement(
+    language: NotebookLanguage,
+    wire: NotebookRuntimeBinding
+  ): Promise<NotebookSessionRuntimeBinding | undefined> {
+    if ((this.options.platform ?? process.platform) !== 'win32') return undefined
+    if (
+      wire.language !== language ||
+      wire.source !== 'managed' ||
+      wire.provenance !== 'app-managed'
+    ) {
+      return undefined
+    }
+
+    const environment = defaultEnvironment(language)
+    const legacyPrefix = legacyDefaultEnvPrefix(getRuntimeRoot(this.options.dataRoot), environment)
+    const legacyInterpreter =
+      language === 'python'
+        ? join(legacyPrefix, 'python.exe')
+        : join(legacyPrefix, 'Lib', 'R', 'bin', 'R.exe')
+    const legacyKey = windowsPathKey(legacyInterpreter)
+    if (
+      windowsPathKey(wire.runtimeId) !== legacyKey ||
+      windowsPathKey(wire.interpreterPath) !== legacyKey
+    ) {
+      return undefined
+    }
+
+    const settings = await this.runtimeSettingsSnapshot(language)
+    const discovered = await this.discover(language, settings?.manualInterpreters ?? [])
+    const replacement = discovered.find(
+      (env) =>
+        env.provenance === 'app-managed' &&
+        env.condaEnv === environment &&
+        env.runnable &&
+        windowsPathKey(env.envId) !== legacyKey &&
+        isEnvEnabled(env, settings?.runtimeEnablement)
+    )
+    if (!replacement) return undefined
+
+    const binding = this.toInternalBinding(replacement)
+    return this.options.repairPolicy.bindingRequirement(language, environment, binding).required
+      ? { ...binding, status: 'unavailable', reason: 'repair-required' }
+      : binding
   }
 
   private async discover(

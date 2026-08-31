@@ -6,6 +6,7 @@ import { basename, dirname, join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import {
+  addRepairRequired,
   DEFAULT_ENV_VERSION,
   DEFAULT_PY_ENV,
   DEFAULT_R_ENV,
@@ -2623,6 +2624,16 @@ describe('DefaultRuntimeProvisioner prefix-block self-guard (startup gate path)'
     const status = provisioner.status()
     expect(status.pythonRecoveryBlocked).toBe(true)
     expect(status.rRecoveryBlocked).toBe(false)
+  })
+
+  it('status() reports a durable repair marker after a failed explicit reinstall', () => {
+    const root = makeRoot()
+    addRepairRequired(root, DEFAULT_PY_ENV, 'protected-identity-change')
+
+    const status = new DefaultRuntimeProvisioner(makeDeps(root)).status()
+
+    expect(status.pythonRecoveryBlocked).toBe(true)
+    expect(status.rRecoveryBlocked).not.toBe(true)
   })
 
   it('a corrupt journal Reset moves the journal aside BEFORE deleting the prefix (never delete-then-fail)', async () => {

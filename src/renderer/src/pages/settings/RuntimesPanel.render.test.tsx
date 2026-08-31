@@ -811,6 +811,34 @@ describe('RuntimesPanel', () => {
     )
   })
 
+  it('offers Reset immediately when a failed reinstall removes the discovered runtime', async () => {
+    repairBridge.mockRejectedValueOnce(new Error('rebuild failed after prefix deletion'))
+    listEnvironments
+      .mockResolvedValueOnce({ python: pythonEnvs, r: rEnvs })
+      .mockResolvedValueOnce({ python: [pythonEnvs[1]], r: rEnvs })
+    const getStatus = window.api.notebookEnv.getStatus as ReturnType<typeof vi.fn>
+    getStatus
+      .mockResolvedValueOnce(provisionStatus)
+      .mockResolvedValueOnce({ ...provisionStatus, pythonRecoveryBlocked: true })
+
+    await render()
+    await click(container.querySelector('[data-testid="runtime-reinstall-python"]'))
+    const dialog = document.querySelector('[data-testid="runtime-reinstall-dialog"]')
+    const confirmBtn = dialog
+      ? Array.from(dialog.querySelectorAll('button')).find((button) =>
+          /reinstall runtime/i.test(button.textContent ?? '')
+        )
+      : null
+    await click(confirmBtn ?? null)
+    await act(async () => {})
+    await act(async () => {})
+
+    const resetBtn = Array.from(container.querySelectorAll('button')).find((button) =>
+      /^reset runtime$/i.test((button.textContent ?? '').trim())
+    )
+    expect(resetBtn).toBeDefined()
+  })
+
   it('keeps Cancel clickable while a real Download-and-set-up is in flight (not locked by busy)', async () => {
     // A provision that stays pending, so the setup is genuinely mid-flight when we look for Cancel.
     let resolveProvision: (() => void) | undefined

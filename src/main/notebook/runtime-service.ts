@@ -473,7 +473,7 @@ class NotebookRuntimeService {
       bindings: this.runtimeBindingOwner,
       environmentOperations: this.environmentOperations,
       sessions: () => this.sessions.values(),
-      findSession: (sessionId) => this.sessions.get(this.sessionLifecycle.rootLane(sessionId)),
+      isCurrentSession: (session) => this.sessions.get(session.lane) === session,
       clearKernelTermination: (session, processKey) =>
         this.sessionLifecycle.clearPersistedKernelTermination(session, processKey),
       notifyChanged: (session) => this.sessionLifecycle.notifyChanged(session)
