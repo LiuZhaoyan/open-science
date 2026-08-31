@@ -135,7 +135,10 @@ describe('StorageMigrationModal', () => {
 
     expect(document.body.textContent).toContain('Copy phase requires 1.0 KB')
     expect(document.body.textContent).toContain('Available on target disk: 600 B')
-    expect(document.body.textContent).toContain('may not have enough space for the copy')
+    const capacityWarning = Array.from(document.body.querySelectorAll('p')).find((element) =>
+      element.textContent?.includes('may not have enough space for the copy')
+    )
+    expect(capacityWarning?.className).toContain('text-status-warning-foreground')
 
     act(() => {
       progressListener?.({

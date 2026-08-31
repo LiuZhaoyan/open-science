@@ -1,50 +1,85 @@
-import { join, win32 } from 'node:path'
+import { win32 } from 'node:path'
 
 import type { NotebookLanguage } from '../../shared/notebook'
 import type { NotebookRuntimeBinding } from '../../shared/notebook-runtime'
-import { getRuntimeRoot } from './repository'
-import { DEFAULT_PY_ENV, DEFAULT_R_ENV, legacyDefaultEnvPrefix } from './runtime-paths'
+import { logicalEnvNameFromDirectory } from './runtime-paths'
 
-type LegacyWindowsManagedDefault = {
-  environment: typeof DEFAULT_PY_ENV | typeof DEFAULT_R_ENV
+export type WindowsManagedRuntimeLocation = {
+  environment: string
   interpreterKey: string
+  runtimeRoot: string
 }
 
 export const windowsRuntimePathKey = (path: string): string => win32.normalize(path).toLowerCase()
 
-export const legacyWindowsManagedDefault = ({
-  dataRoot,
+export const windowsManagedRuntimeLocation = ({
+  language,
+  platform,
+  runtimeId
+}: {
+  language: NotebookLanguage
+  platform: NodeJS.Platform
+  runtimeId: string
+}): WindowsManagedRuntimeLocation | undefined => {
+  if (platform !== 'win32' || !win32.isAbsolute(runtimeId)) return undefined
+
+  const normalizedRuntimeId = win32.normalize(runtimeId)
+  const interpreterKey = windowsRuntimePathKey(runtimeId)
+  let environmentDirectory: string
+  if (language === 'python') {
+    if (win32.basename(interpreterKey) !== 'python.exe') return undefined
+    environmentDirectory = win32.dirname(normalizedRuntimeId)
+  } else {
+    if (win32.basename(interpreterKey) !== 'r.exe') return undefined
+    const binDirectory = win32.dirname(normalizedRuntimeId)
+    const rDirectory = win32.dirname(binDirectory)
+    const libDirectory = win32.dirname(rDirectory)
+    if (
+      win32.basename(binDirectory).toLowerCase() !== 'bin' ||
+      win32.basename(rDirectory).toLowerCase() !== 'r' ||
+      win32.basename(libDirectory).toLowerCase() !== 'lib'
+    ) {
+      return undefined
+    }
+    environmentDirectory = win32.dirname(libDirectory)
+  }
+
+  const envsDirectory = win32.dirname(environmentDirectory)
+  const runtimeRoot = win32.dirname(envsDirectory)
+  if (
+    win32.basename(envsDirectory).toLowerCase() !== 'envs' ||
+    win32.basename(runtimeRoot).toLowerCase() !== 'runtime'
+  ) {
+    return undefined
+  }
+
+  return {
+    environment: logicalEnvNameFromDirectory(win32.basename(environmentDirectory)),
+    interpreterKey,
+    runtimeRoot
+  }
+}
+
+export const historicalWindowsManagedEnvironment = ({
   language,
   platform,
   wire
 }: {
-  dataRoot: string
   language: NotebookLanguage
   platform: NodeJS.Platform
   wire: NotebookRuntimeBinding
-}): LegacyWindowsManagedDefault | undefined => {
-  if (platform !== 'win32') return undefined
+}): WindowsManagedRuntimeLocation | undefined => {
   if (
     wire.language !== language ||
     wire.source !== 'managed' ||
-    wire.provenance !== 'app-managed'
+    (wire.provenance !== 'app-managed' && wire.provenance !== 'agent-created')
   ) {
     return undefined
   }
 
-  const environment = language === 'r' ? DEFAULT_R_ENV : DEFAULT_PY_ENV
-  const legacyPrefix = legacyDefaultEnvPrefix(getRuntimeRoot(dataRoot), environment)
-  const legacyInterpreter =
-    language === 'python'
-      ? join(legacyPrefix, 'python.exe')
-      : join(legacyPrefix, 'Lib', 'R', 'bin', 'R.exe')
-  const interpreterKey = windowsRuntimePathKey(legacyInterpreter)
-  if (
-    windowsRuntimePathKey(wire.runtimeId) !== interpreterKey ||
-    windowsRuntimePathKey(wire.interpreterPath) !== interpreterKey
-  ) {
+  const interpreterKey = windowsRuntimePathKey(wire.interpreterPath)
+  if (windowsRuntimePathKey(wire.runtimeId) !== interpreterKey) {
     return undefined
   }
-
-  return { environment, interpreterKey }
+  return windowsManagedRuntimeLocation({ language, platform, runtimeId: interpreterKey })
 }

@@ -136,7 +136,8 @@ import { deleteNotebookProjectInputs, deleteNotebookSessionInputs } from './inpu
 // The default stays outside CN mirror routing when no explicit locale is injected.
 const DEFAULT_LOCALE = 'en-US'
 
-const EMPTY_NOTEBOOK_RUNTIME_SETTINGS: Pick<NotebookRuntimeSettings, 'getSnapshot'> = {
+const EMPTY_NOTEBOOK_RUNTIME_SETTINGS: Pick<NotebookRuntimeSettings, 'getSnapshot'> &
+  Partial<Pick<NotebookRuntimeSettings, 'setEnvironmentEnabled'>> = {
   getSnapshot: async (language) => ({
     language,
     runtimeEnablement: { enabled: {}, installAuthorized: {} },
@@ -191,7 +192,8 @@ type NotebookRuntimeServiceOptions = ProjectIdScope & {
   getPackageMirror?: () => PackageMirror | undefined | Promise<PackageMirror | undefined>
   // Stable, detached Settings capability used by runtime discovery and binding policy. Production
   // injects this named capability; isolated tests may omit it and receive a fail-safe empty policy.
-  notebookRuntimeSettings?: Pick<NotebookRuntimeSettings, 'getSnapshot'>
+  notebookRuntimeSettings?: Pick<NotebookRuntimeSettings, 'getSnapshot'> &
+    Partial<Pick<NotebookRuntimeSettings, 'setEnvironmentEnabled'>>
   // Discovers the interpreters available for a language (app-managed + user-own). Injectable so tests
   // don't spawn real interpreters; production defaults to environment-discovery over the runtime root.
   discoverRuntimes?: (language: NotebookLanguage) => Promise<DiscoveredInterpreter[]>

@@ -26,7 +26,11 @@ import type {
   NotebookSessionResolvedInterpreter,
   NotebookSessionRuntimeBinding
 } from './session-aggregate'
-import { legacyWindowsManagedDefault, windowsRuntimePathKey } from './windows-runtime-binding'
+import { historicalPosixManagedEnvironment } from './posix-runtime-binding'
+import {
+  historicalWindowsManagedEnvironment,
+  windowsRuntimePathKey
+} from './windows-runtime-binding'
 
 const log = createLogger('notebook:runtime-binding')
 
@@ -44,7 +48,8 @@ type RuntimeBindingRepository = Pick<NotebookRunRepository, 'setRuntimeBindings'
 type NotebookRuntimeBindingOwnerOptions = {
   dataRoot: string
   repository: RuntimeBindingRepository
-  runtimeSettings: Pick<NotebookRuntimeSettings, 'getSnapshot'>
+  runtimeSettings: Pick<NotebookRuntimeSettings, 'getSnapshot'> &
+    Partial<Pick<NotebookRuntimeSettings, 'setEnvironmentEnabled'>>
   repairPolicy: Pick<NotebookRuntimeRepairPolicy, 'bindingRequirement'>
   discoverRuntimes?: (language: NotebookLanguage) => Promise<DiscoveredInterpreter[]>
   platform?: NodeJS.Platform
@@ -401,7 +406,7 @@ export class NotebookRuntimeBindingOwner {
     persisted: NotebookRuntimeBindings | undefined
   ): Promise<void> {
     if (!persisted) return
-    let migratedLegacyDefault = false
+    let migratedHistoricalBinding = false
     for (const language of ['python', 'r'] as const) {
       const wire = persisted[language]
       if (!wire) continue
@@ -411,10 +416,10 @@ export class NotebookRuntimeBindingOwner {
           await this.resolveEnabledRuntime(language, wire.runtimeId)
         )
       } catch {
-        const migrated = await this.legacyManagedDefaultReplacement(language, wire)
+        const migrated = await this.historicalManagedEnvironmentReplacement(language, wire)
         if (migrated) {
           session.setRuntimeBinding(language, migrated)
-          migratedLegacyDefault = true
+          migratedHistoricalBinding = true
           continue
         }
         const settings = await this.runtimeSettingsSnapshot(language)
@@ -433,41 +438,57 @@ export class NotebookRuntimeBindingOwner {
         })
       }
     }
-    if (migratedLegacyDefault) {
+    if (migratedHistoricalBinding) {
       // Persist once after both languages are restored so migrating one binding never temporarily
-      // drops the other. A later launch must not rediscover the removed legacy prefix as missing.
+      // drops the other. A later launch must not rediscover the old-root prefix as missing.
       await this.persistStrict(session)
     }
   }
 
-  private async legacyManagedDefaultReplacement(
+  private async historicalManagedEnvironmentReplacement(
     language: NotebookLanguage,
     wire: NotebookRuntimeBinding
   ): Promise<NotebookSessionRuntimeBinding | undefined> {
-    const legacyDefault = legacyWindowsManagedDefault({
-      dataRoot: this.options.dataRoot,
-      language,
-      platform: this.options.platform ?? process.platform,
-      wire
-    })
-    if (!legacyDefault) return undefined
+    const platform = this.options.platform ?? process.platform
+    const historical =
+      historicalWindowsManagedEnvironment({ language, platform, wire }) ??
+      historicalPosixManagedEnvironment({ language, platform, wire })
+    if (!historical) return undefined
 
     const settings = await this.runtimeSettingsSnapshot(language)
     const discovered = await this.discover(language, settings?.manualInterpreters ?? [])
+    const previousEnablement = settings?.runtimeEnablement.enabled[wire.runtimeId]
+    const wasDisabled =
+      previousEnablement === false ||
+      (previousEnablement === undefined && wire.reason === 'disabled')
     const replacement = discovered.find(
       (env) =>
-        env.provenance === 'app-managed' &&
-        env.condaEnv === legacyDefault.environment &&
+        env.provenance === wire.provenance &&
+        (platform === 'win32'
+          ? env.condaEnv?.toLowerCase() === historical.environment.toLowerCase()
+          : env.condaEnv === historical.environment) &&
         env.runnable &&
-        windowsRuntimePathKey(env.envId) !== legacyDefault.interpreterKey &&
-        isEnvEnabled(env, settings?.runtimeEnablement)
+        (platform === 'win32'
+          ? windowsRuntimePathKey(env.envId) !== historical.interpreterKey
+          : env.envId !== historical.interpreterKey) &&
+        (wasDisabled || isEnvEnabled(env, settings?.runtimeEnablement))
     )
     if (!replacement) return undefined
 
     const binding = this.toInternalBinding(replacement)
+    if (wasDisabled) {
+      const setEnvironmentEnabled = this.options.runtimeSettings.setEnvironmentEnabled
+      if (!setEnvironmentEnabled) return undefined
+      try {
+        await setEnvironmentEnabled(language, replacement.envId, false)
+      } catch {
+        return undefined
+      }
+      return { ...binding, status: 'unavailable', reason: 'disabled' }
+    }
     return this.options.repairPolicy.bindingRequirement(
       language,
-      legacyDefault.environment,
+      binding.envName ?? historical.environment,
       binding
     ).required
       ? { ...binding, status: 'unavailable', reason: 'repair-required' }

@@ -436,9 +436,13 @@ export const validateNewDataRoot = async (
 // runtime/ is not copied wholesale (env prefixes and mutable inventory-cache keys bake absolute
 // paths), but its pkgs cache IS relocatable inert data — copied so envs can be rebuilt offline at the
 // new root from their exported locks. Immutable Environment manifests are copied separately because
-// Notebook and Artifact provenance reference them by checksum. Nested paths are intentional:
-// copyAndVerify mirrors `from/<dir>` → `to/<dir>`.
+// Notebook and Artifact provenance reference them by checksum. The repair-required registry is also
+// relocatable: managed keys use environment names, while external keys continue to name the same
+// user-owned runtimes. Preserving it is load-bearing because missing state could reactivate a runtime
+// quarantined after an interrupted or identity-changing operation. Nested paths are intentional:
+// copyAndVerify mirrors `from/<path>` → `to/<path>` and accepts regular files as roots.
 const RUNTIME_PKGS_DIR = join('runtime', 'pkgs')
+export const RUNTIME_REPAIR_REGISTRY_FILE = join('runtime', '.repair-required.json')
 export const RUNTIME_ENVIRONMENT_MANIFESTS_DIR = join(
   'runtime',
   'provenance',
@@ -448,7 +452,11 @@ const RUNTIME_ENVIRONMENT_INVENTORY_DIR = join('runtime', 'provenance', 'environ
 // The SQLite authority stays under the fixed config root. Keep the filename exported for migration
 // validation/tests, but never put it in the relocatable data-root copy/delete set.
 export const PROJECT_DATABASE_FILE = 'open-science.db'
-const BASE_MIGRATION_DIRS = [...MIGRATED_DIRS, RUNTIME_ENVIRONMENT_MANIFESTS_DIR]
+const BASE_MIGRATION_DIRS = [
+  ...MIGRATED_DIRS,
+  RUNTIME_ENVIRONMENT_MANIFESTS_DIR,
+  RUNTIME_REPAIR_REGISTRY_FILE
+]
 
 const defaultValidateProvenanceState = (dataRoot: string): Promise<void> =>
   validateProvenanceMigrationState(dataRoot, resolveConfigRoot())
@@ -878,9 +886,11 @@ export const commitDataRootSwitch = async (
       error: 'The staged copy does not include all current data. Run the move again.'
     })
   }
-  const requiredPaths = [RUNTIME_ENVIRONMENT_MANIFESTS_DIR, RUNTIME_PKGS_DIR].filter((path) =>
-    existsSync(join(deps.currentDataRoot, path))
-  )
+  const requiredPaths = [
+    RUNTIME_ENVIRONMENT_MANIFESTS_DIR,
+    RUNTIME_REPAIR_REGISTRY_FILE,
+    RUNTIME_PKGS_DIR
+  ].filter((path) => existsSync(join(deps.currentDataRoot, path)))
   if (requiredPaths.some((path) => !migratedDirs.includes(path))) {
     return failResult({
       ok: false,

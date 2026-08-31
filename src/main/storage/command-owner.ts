@@ -792,11 +792,13 @@ const createStorageCommandOwner = (deps: StorageCommandOwnerDeps) => {
 
       let outcome: MigrationOutcome
       try {
+        const currentDataRoot = resolveDataRoot()
         outcome = await commitDataRootSwitch(
           {
-            currentDataRoot: resolveDataRoot(),
+            currentDataRoot,
             // Arrow-wrapped so setDataRoot is called as a method (it reads `this.repository`).
-            setDataRoot: (path) => deps.settingsService.setDataRoot(path),
+            setDataRoot: (path) =>
+              deps.settingsService.setDataRoot(path, { previousDataRoot: currentDataRoot }),
             // Prove the on-disk copy is the one this session staged (guards against a stale marker).
             expectedToken: staged.token,
             cleanupJournal,
@@ -1044,7 +1046,8 @@ const createStorageCommandOwner = (deps: StorageCommandOwnerDeps) => {
       }
       operation.phase('persist-pointer', { mode: classification.kind })
       await deps.settingsService.setDataRoot(target, {
-        completeOnboarding: request.markOnboarding === true
+        completeOnboarding: request.markOnboarding === true,
+        previousDataRoot: resolveDataRoot()
       })
       pointerCommitted = true
       quitOperation.markCommitted()

@@ -189,7 +189,9 @@ describe('storage IPC handlers', () => {
     await expect(invoke('storage:migrate', { parent: targetParent })).resolves.toEqual({ ok: true })
     await expect(owner.commitAndRelaunch({ parent: targetParent })).resolves.toEqual({ ok: true })
 
-    expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target)
+    expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
+      previousDataRoot: dataRoot
+    })
     expect(deps.runtime.disconnect).toHaveBeenCalledOnce()
     expect(deps.notebook.shutdownAll).toHaveBeenCalledOnce()
     expect(deps.prepareDataRootHandoff).toHaveBeenCalledWith({ surface: 'electron-renderer' }, true)
@@ -270,7 +272,9 @@ describe('storage IPC handlers', () => {
       ok: true
     })
 
-    expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target)
+    expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
+      previousDataRoot: dataRoot
+    })
     expect(deps.runtime.disconnect).toHaveBeenCalledOnce()
     expect(deps.notebook.shutdownAll).toHaveBeenCalledOnce()
     expect(deps.relaunch).toHaveBeenCalledTimes(1)
@@ -1411,9 +1415,11 @@ describe('storage IPC handlers', () => {
     // The commit handler must pass it wrapped, not as a bare reference — otherwise the pointer flip
     // throws on undefined `this` and surfaces to the user as switchoverFailed.
     const persisted: string[] = []
+    const previousRoots: Array<string | undefined> = []
     class FakeSettingsService {
       private repository = { save: (path: string): void => void persisted.push(path) }
-      setDataRoot(path: string): Promise<void> {
+      setDataRoot(path: string, options?: { previousDataRoot?: string }): Promise<void> {
+        previousRoots.push(options?.previousDataRoot)
         this.repository.save(path)
         return Promise.resolve()
       }
@@ -1427,6 +1433,7 @@ describe('storage IPC handlers', () => {
     await expect(invoke('storage:commit-and-relaunch', { parent: targetParent })).resolves.toEqual({
       ok: true
     })
+    expect(previousRoots).toEqual([dataRoot])
     expect(persisted).toEqual([target])
     expect(deps.relaunch).toHaveBeenCalledTimes(1)
   })
@@ -1773,7 +1780,8 @@ describe('storage IPC handlers', () => {
         invoke('storage:set-data-root-and-relaunch', { parent: alternateParent })
       ).resolves.toEqual({ ok: true })
       expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(dataRootFor(alternateParent), {
-        completeOnboarding: false
+        completeOnboarding: false,
+        previousDataRoot: target
       })
       expect(deps.relaunch).toHaveBeenCalledOnce()
       await expect(cleanupJournal.hasPending()).resolves.toBe(true)
@@ -2004,7 +2012,8 @@ describe('storage IPC handlers', () => {
       invoke('storage:set-data-root-and-relaunch', { parent: targetParent })
     ).resolves.toEqual({ ok: true })
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: false
+      completeOnboarding: false,
+      previousDataRoot: dataRoot
     })
     expect(deps.relaunch).toHaveBeenCalledTimes(1)
   })
@@ -2055,7 +2064,8 @@ describe('storage IPC handlers', () => {
       invoke('storage:set-data-root-and-relaunch', { parent: targetParent })
     ).resolves.toEqual({ ok: true })
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: false
+      completeOnboarding: false,
+      previousDataRoot: dataRoot
     })
     expect(deps.relaunch).toHaveBeenCalledTimes(1)
   })
@@ -2076,7 +2086,8 @@ describe('storage IPC handlers', () => {
 
     expect(existsSync(target)).toBe(true)
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: true
+      completeOnboarding: true,
+      previousDataRoot: dataRoot
     })
   })
 
@@ -2112,7 +2123,8 @@ describe('storage IPC handlers', () => {
       invoke('storage:set-data-root-and-relaunch', { parent: targetParent })
     ).resolves.toEqual({ ok: true })
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: false
+      completeOnboarding: false,
+      previousDataRoot: dataRoot
     })
     expect(deps.relaunch).toHaveBeenCalledTimes(1)
   })
@@ -2521,7 +2533,8 @@ describe('storage IPC handlers', () => {
     })
 
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: true
+      completeOnboarding: true,
+      previousDataRoot: dataRoot
     })
   })
 
@@ -2536,7 +2549,8 @@ describe('storage IPC handlers', () => {
     })
 
     expect(deps.settingsService.setDataRoot).toHaveBeenCalledWith(target, {
-      completeOnboarding: false
+      completeOnboarding: false,
+      previousDataRoot: dataRoot
     })
   })
 

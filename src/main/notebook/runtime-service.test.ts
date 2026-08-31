@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, posix, win32 } from 'node:path'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -7383,8 +7383,9 @@ describe('v4 runtime bindings & agent tools', () => {
       packageChanges?: NotebookEnvironmentPackageChange[]
       environmentManager?: NotebookEnvironmentManager
     } = {}
-  ): NotebookRuntimeService =>
-    new NotebookRuntimeService({
+  ): NotebookRuntimeService => {
+    const enablement = options.enablement ?? { enabled: {}, installAuthorized: {} }
+    return new NotebookRuntimeService({
       configRoot: root,
       dataRoot: root,
       projectId: 'default-project',
@@ -7398,10 +7399,14 @@ describe('v4 runtime bindings & agent tools', () => {
       notebookRuntimeSettings: {
         getSnapshot: async (language) => ({
           language,
-          runtimeEnablement: options.enablement ?? { enabled: {}, installAuthorized: {} },
+          runtimeEnablement: enablement,
           manualInterpreters: [],
           packageMirror: {}
-        })
+        }),
+        setEnvironmentEnabled: async (_language, envId, enabled) => {
+          enablement.enabled[envId] = enabled
+          return enablement
+        }
       },
       platform: options.platform,
       environmentManager: options.environmentManager,
@@ -7437,6 +7442,7 @@ describe('v4 runtime bindings & agent tools', () => {
           })
       })
     })
+  }
 
   it('prepares a healthy managed Python reinstall by closing explicit and implicit kernels', async () => {
     const root = await createStorageRoot()
@@ -10614,6 +10620,232 @@ describe('v4 runtime bindings & agent tools', () => {
     expect(persisted.runtimeBindings?.python?.runtimeId).toBe(currentPython)
     expect(persisted.runtimeBindings?.r?.runtimeId).toBe(currentR)
   })
+
+  const relocationBindingCases: Array<{
+    scenario: string
+    platform: NodeJS.Platform
+    environment: string
+    provenance: 'app-managed' | 'agent-created'
+    previous: string
+    current: string
+    status?: 'active' | 'unavailable'
+    reason?: 'disabled' | 'repair-required'
+    previousEnabled?: boolean
+  }> = [
+    {
+      scenario: 'linux-default',
+      platform: 'linux' as const,
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed' as const,
+      previous: posix.join(
+        '/mnt/old/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      ),
+      current: posix.join(
+        '/mnt/new/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      )
+    },
+    {
+      scenario: 'darwin-default',
+      platform: 'darwin' as const,
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed' as const,
+      previous: posix.join(
+        '/Volumes/Old/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      ),
+      current: posix.join(
+        '/Volumes/New/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      )
+    },
+    {
+      scenario: 'windows-default',
+      platform: 'win32' as const,
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed' as const,
+      previous: win32.join('D:\\Old\\OpenScience', 'runtime', 'envs', '.p', 'python.exe'),
+      current: win32.join('E:\\New\\OpenScience', 'runtime', 'envs', '.p', 'python.exe')
+    },
+    {
+      scenario: 'linux-named',
+      platform: 'linux' as const,
+      environment: 'analysis',
+      provenance: 'agent-created' as const,
+      previous: posix.join('/mnt/old/OpenScience', 'runtime', 'envs', 'analysis', 'bin', 'python'),
+      current: posix.join('/mnt/new/OpenScience', 'runtime', 'envs', 'analysis', 'bin', 'python')
+    },
+    {
+      scenario: 'windows-named',
+      platform: 'win32' as const,
+      environment: 'analysis',
+      provenance: 'agent-created' as const,
+      previous: win32.join('D:\\Old\\OpenScience', 'runtime', 'envs', 'analysis', 'python.exe'),
+      current: win32.join('E:\\New\\OpenScience', 'runtime', 'envs', 'analysis', 'python.exe')
+    },
+    {
+      scenario: 'linux-disabled-default',
+      platform: 'linux',
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed',
+      previous: posix.join(
+        '/mnt/old/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      ),
+      current: posix.join(
+        '/mnt/new/OpenScience',
+        'runtime',
+        'envs',
+        DEFAULT_PY_ENV,
+        'bin',
+        'python'
+      ),
+      status: 'unavailable',
+      reason: 'disabled',
+      previousEnabled: false
+    },
+    {
+      scenario: 'windows-repair-required-default',
+      platform: 'win32',
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed',
+      previous: win32.join('D:\\Old\\OpenScience', 'runtime', 'envs', '.p', 'python.exe'),
+      current: win32.join('E:\\New\\OpenScience', 'runtime', 'envs', '.p', 'python.exe'),
+      status: 'unavailable',
+      reason: 'repair-required'
+    }
+  ]
+
+  it.each(relocationBindingCases)(
+    'migrates a persisted $scenario managed binding after data-root relocation',
+    async ({
+      platform,
+      previous,
+      current,
+      environment,
+      provenance,
+      status = 'active',
+      reason,
+      previousEnabled
+    }) => {
+      const root = await createStorageRoot()
+      const repository = new NotebookRunRepository(root)
+      const sessionId = `relocated-${platform}-${environment}`
+      const lane = createRootNotebookLane('default-project', sessionId, `root-frame-${sessionId}`)
+      const enablement: RuntimeEnablement = {
+        enabled: previousEnabled === undefined ? {} : { [previous]: previousEnabled },
+        installAuthorized: {}
+      }
+
+      await repository.loadOrCreate({
+        projectId: 'default-project',
+        sessionId,
+        workspaceCwd: root,
+        lane
+      })
+      await repository.setRuntimeBindings(
+        'default-project',
+        sessionId,
+        {
+          python: {
+            language: 'python',
+            runtimeId: previous,
+            source: 'managed',
+            provenance,
+            interpreterPath: previous,
+            label: 'Python (managed)',
+            status,
+            ...(reason ? { reason } : {})
+          }
+        },
+        lane
+      )
+      if (reason === 'repair-required') {
+        addRepairRequired(
+          getRuntimeRoot(root),
+          managedRepairRegistryKey(environment, 'python'),
+          'interrupted-install'
+        )
+      }
+
+      const service = bindingService(root, {
+        platform,
+        repository,
+        enablement,
+        discovered: [
+          {
+            language: 'python',
+            provenance,
+            envId: current,
+            interpreterPath: current,
+            label: 'Python (managed)',
+            version: '3.12.4',
+            runnable: true,
+            condaEnv: environment
+          }
+        ]
+      })
+
+      const state = await service.state({ sessionId, workspaceCwd: root })
+      expect(state.runtimeBindings.python).toMatchObject({
+        runtimeId: current,
+        interpreterPath: current,
+        status
+      })
+      expect(state.runtimeBindings.python?.reason).toBe(reason)
+      if (previousEnabled === false) expect(enablement.enabled[current]).toBe(false)
+
+      const persisted = await repository.loadOrCreate({
+        projectId: 'default-project',
+        sessionId,
+        workspaceCwd: root,
+        lane
+      })
+      expect(persisted.runtimeBindings?.python?.runtimeId).toBe(current)
+
+      const reloaded = bindingService(root, {
+        platform,
+        repository,
+        enablement,
+        discovered: [
+          {
+            language: 'python',
+            provenance,
+            envId: current,
+            interpreterPath: current,
+            label: 'Python (managed)',
+            version: '3.12.4',
+            runnable: true,
+            condaEnv: environment
+          }
+        ]
+      })
+      const reloadedState = await reloaded.state({ sessionId, workspaceCwd: root })
+      expect(reloadedState.runtimeBindings.python).toMatchObject({ runtimeId: current, status })
+      expect(reloadedState.runtimeBindings.python?.reason).toBe(reason)
+    }
+  )
 
   // WS9: certify the disable/binding lifecycle across the scenarios from the disable-binding spec.
   describe('disable lifecycle certification (WS9)', () => {

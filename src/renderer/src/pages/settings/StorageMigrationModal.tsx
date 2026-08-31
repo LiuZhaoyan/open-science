@@ -374,7 +374,7 @@ const StorageMigrationModal = ({
                         })}
                       </p>
                       {copyRequiredBytes > targetAvailableBytes ? (
-                        <p className="text-destructive">
+                        <p className="text-status-warning-foreground dark:text-status-warning-dark-foreground">
                           {t('The target may not have enough space for the copy.')}
                         </p>
                       ) : null}

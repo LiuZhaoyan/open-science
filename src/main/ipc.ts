@@ -1316,7 +1316,10 @@ const createApplicationModules = async (
     home: dirname(dirname(provisioningRoot)),
     resourcesPath: process.resourcesPath
   })
-  const notebookRuntimeSettings: Pick<NotebookRuntimeSettings, 'getSnapshot'> = {
+  const notebookRuntimeSettings: Pick<
+    NotebookRuntimeSettings,
+    'getSnapshot' | 'setEnvironmentEnabled'
+  > = {
     getSnapshot: async (language) => {
       const [runtimeSelection, runtimeEnablement, manualInterpreters, packageMirror] =
         await Promise.all([
@@ -1332,7 +1335,9 @@ const createApplicationModules = async (
         manualInterpreters,
         packageMirror
       }
-    }
+    },
+    setEnvironmentEnabled: (language, envId, enabled) =>
+      settingsService.setEnvironmentEnabled(language, envId, enabled)
   }
   const notebookApplication = await modules.add(
     {
