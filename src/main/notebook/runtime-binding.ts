@@ -1,5 +1,3 @@
-import { join, win32 } from 'node:path'
-
 import type { NotebookLanguage } from '../../shared/notebook'
 import {
   isEnvEnabled,
@@ -20,7 +18,7 @@ import {
   windowsCondaPrefixForR
 } from './environment-discovery'
 import { getRuntimeRoot, type NotebookRunRepository } from './repository'
-import { DEFAULT_PY_ENV, DEFAULT_R_ENV, legacyDefaultEnvPrefix } from './runtime-paths'
+import { DEFAULT_PY_ENV, DEFAULT_R_ENV } from './runtime-paths'
 import { runtimeTargetReceipt } from './runtime-target'
 import type { NotebookRuntimeRepairPolicy } from './runtime-repair-policy'
 import type {
@@ -28,6 +26,7 @@ import type {
   NotebookSessionResolvedInterpreter,
   NotebookSessionRuntimeBinding
 } from './session-aggregate'
+import { legacyWindowsManagedDefault, windowsRuntimePathKey } from './windows-runtime-binding'
 
 const log = createLogger('notebook:runtime-binding')
 
@@ -68,8 +67,6 @@ const defaultEnvironment = (
   language: NotebookLanguage
 ): typeof DEFAULT_PY_ENV | typeof DEFAULT_R_ENV =>
   language === 'r' ? DEFAULT_R_ENV : DEFAULT_PY_ENV
-
-const windowsPathKey = (path: string): string => win32.normalize(path).toLowerCase()
 
 /** Owns Notebook runtime discovery, selection, binding transitions, and durable wire snapshots. */
 export class NotebookRuntimeBindingOwner {
@@ -447,43 +444,32 @@ export class NotebookRuntimeBindingOwner {
     language: NotebookLanguage,
     wire: NotebookRuntimeBinding
   ): Promise<NotebookSessionRuntimeBinding | undefined> {
-    if ((this.options.platform ?? process.platform) !== 'win32') return undefined
-    if (
-      wire.language !== language ||
-      wire.source !== 'managed' ||
-      wire.provenance !== 'app-managed'
-    ) {
-      return undefined
-    }
-
-    const environment = defaultEnvironment(language)
-    const legacyPrefix = legacyDefaultEnvPrefix(getRuntimeRoot(this.options.dataRoot), environment)
-    const legacyInterpreter =
-      language === 'python'
-        ? join(legacyPrefix, 'python.exe')
-        : join(legacyPrefix, 'Lib', 'R', 'bin', 'R.exe')
-    const legacyKey = windowsPathKey(legacyInterpreter)
-    if (
-      windowsPathKey(wire.runtimeId) !== legacyKey ||
-      windowsPathKey(wire.interpreterPath) !== legacyKey
-    ) {
-      return undefined
-    }
+    const legacyDefault = legacyWindowsManagedDefault({
+      dataRoot: this.options.dataRoot,
+      language,
+      platform: this.options.platform ?? process.platform,
+      wire
+    })
+    if (!legacyDefault) return undefined
 
     const settings = await this.runtimeSettingsSnapshot(language)
     const discovered = await this.discover(language, settings?.manualInterpreters ?? [])
     const replacement = discovered.find(
       (env) =>
         env.provenance === 'app-managed' &&
-        env.condaEnv === environment &&
+        env.condaEnv === legacyDefault.environment &&
         env.runnable &&
-        windowsPathKey(env.envId) !== legacyKey &&
+        windowsRuntimePathKey(env.envId) !== legacyDefault.interpreterKey &&
         isEnvEnabled(env, settings?.runtimeEnablement)
     )
     if (!replacement) return undefined
 
     const binding = this.toInternalBinding(replacement)
-    return this.options.repairPolicy.bindingRequirement(language, environment, binding).required
+    return this.options.repairPolicy.bindingRequirement(
+      language,
+      legacyDefault.environment,
+      binding
+    ).required
       ? { ...binding, status: 'unavailable', reason: 'repair-required' }
       : binding
   }
