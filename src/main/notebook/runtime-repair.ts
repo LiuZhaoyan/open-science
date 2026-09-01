@@ -53,33 +53,60 @@ class NotebookRuntimeRepairOwner {
   ): Promise<void> {
     const environmentName = defaultEnvironment(language)
     const target = { language, environmentName, binding } satisfies RuntimeRepairTarget
-    const sessions = this.matchingSessions(target, false)
-    this.options.environmentOperations.blockRepair(this.blockKey(target))
-    addRepairRequired(this.options.runtimeRoot, environmentName, 'protected-identity-change')
+    const affectedLanguages = ['python', 'r'] as const
+    const sessions = this.matchingSessions(target, true)
+    const repairKeys = new Set(this.options.policy.registryKeys(language, environmentName, binding))
+    for (const session of sessions) {
+      for (const [boundLanguage, boundBinding] of session.runtimeBindingEntries()) {
+        if (!this.matches(session, boundLanguage, target, true)) continue
+        for (const key of this.options.policy.registryKeys(
+          boundLanguage,
+          environmentName,
+          boundBinding
+        )) {
+          repairKeys.add(key)
+        }
+      }
+    }
+    for (const affectedLanguage of affectedLanguages) {
+      this.options.environmentOperations.blockRepair(
+        this.options.policy.blockKey(affectedLanguage, environmentName)
+      )
+    }
+    for (const key of repairKeys) {
+      addRepairRequired(this.options.runtimeRoot, key, 'protected-identity-change')
+    }
 
     await this.options.bindings.runWrites(
       sessions.map((session) => session.sessionId),
       async () => {
-        const changed: RepairSession[] = []
+        const changed = new Set<RepairSession>()
         for (const session of sessions) {
           if (!this.options.isCurrentSession(session)) continue
-          if (
-            session.runtimeBinding(language) &&
-            this.options.bindings.markUnavailable(session, language, 'repair-required')
-          ) {
-            changed.push(session)
+          for (const affectedLanguage of affectedLanguages) {
+            if (!this.matches(session, affectedLanguage, target, true)) continue
+            if (
+              session.runtimeBinding(affectedLanguage) &&
+              this.options.bindings.markUnavailable(session, affectedLanguage, 'repair-required')
+            ) {
+              changed.add(session)
+            }
           }
         }
         for (const session of changed) await this.options.bindings.persistStrict(session)
 
         for (const session of sessions) {
           if (!this.options.isCurrentSession(session)) continue
-          const key = processKey(language, environmentName)
-          if (session.kernelStatus(key) === 'running') session.markForceStopped(key)
-          await session.terminateExecutor(language === 'r' ? 'r' : 'python', environmentName)
-          await this.options.clearKernelTermination(session, key)
-          session.clearProcessState(key)
-          this.options.notifyChanged(session)
+          for (const affectedLanguage of affectedLanguages) {
+            if (!this.matches(session, affectedLanguage, target, true)) continue
+            const environment = this.environmentFor(session, affectedLanguage)
+            const key = processKey(affectedLanguage, environment)
+            if (session.kernelStatus(key) === 'running') session.markForceStopped(key)
+            await session.terminateExecutor(affectedLanguage === 'r' ? 'r' : 'python', environment)
+            await this.options.clearKernelTermination(session, key)
+            session.clearProcessState(key)
+            this.options.notifyChanged(session)
+          }
         }
       }
     )
@@ -173,15 +200,17 @@ class NotebookRuntimeRepairOwner {
   ): Promise<void> {
     const environmentName = defaultEnvironment(language)
     const target = { language, environmentName } satisfies RuntimeRepairTarget
-    const aliases = new Set<string>()
-    for (const affectedLanguage of ['python', 'r'] as const) {
-      for (const key of this.options.policy.registryKeys(affectedLanguage, environmentName)) {
-        aliases.add(key)
-      }
-    }
+    const aliases = new Set(this.options.policy.registryKeys(language, environmentName))
     for (const session of this.options.sessions()) {
       for (const [boundLanguage, binding] of session.runtimeBindingEntries()) {
-        if (this.matches(session, boundLanguage, target, true)) aliases.add(binding.runtimeId)
+        if (!this.matches(session, boundLanguage, target, false)) continue
+        for (const key of this.options.policy.registryKeys(
+          boundLanguage,
+          environmentName,
+          binding
+        )) {
+          aliases.add(key)
+        }
       }
     }
 
@@ -208,14 +237,10 @@ class NotebookRuntimeRepairOwner {
 
     // Keep the primary durable gate armed until refreshed bindings are durable and every compatibility
     // alias has been cleared. If any step fails, execution remains blocked and Reset can be retried.
-    aliases.delete(environmentName)
     for (const alias of aliases) clearRepairRequired(this.options.runtimeRoot, alias)
-    clearRepairRequired(this.options.runtimeRoot, environmentName)
-    for (const affectedLanguage of ['python', 'r'] as const) {
-      this.options.environmentOperations.clearRepair(
-        this.options.policy.blockKey(affectedLanguage, environmentName)
-      )
-    }
+    this.options.environmentOperations.clearRepair(
+      this.options.policy.blockKey(language, environmentName)
+    )
     for (const session of sessions) this.options.notifyChanged(session)
   }
 

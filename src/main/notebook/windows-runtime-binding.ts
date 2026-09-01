@@ -2,7 +2,7 @@ import { win32 } from 'node:path'
 
 import type { NotebookLanguage } from '../../shared/notebook'
 import type { NotebookRuntimeBinding } from '../../shared/notebook-runtime'
-import { logicalEnvNameFromDirectory } from './runtime-paths'
+import { envDirectoryName, logicalEnvNameFromDirectory, resolveEnvName } from './runtime-paths'
 
 export type WindowsManagedRuntimeLocation = {
   environment: string
@@ -11,6 +11,30 @@ export type WindowsManagedRuntimeLocation = {
 }
 
 export const windowsRuntimePathKey = (path: string): string => win32.normalize(path).toLowerCase()
+
+export const managedRuntimeEnvironmentNamesMatch = ({
+  platform,
+  candidate,
+  expected
+}: {
+  platform: NodeJS.Platform
+  candidate: string | undefined
+  expected: string
+}): boolean =>
+  platform === 'win32'
+    ? candidate?.toLowerCase() === expected.toLowerCase()
+    : candidate === expected
+
+export const managedRuntimeIdsDiffer = ({
+  platform,
+  candidate,
+  previous
+}: {
+  platform: NodeJS.Platform
+  candidate: string
+  previous: string
+}): boolean =>
+  platform === 'win32' ? windowsRuntimePathKey(candidate) !== previous : candidate !== previous
 
 export const windowsManagedRuntimeLocation = ({
   language,
@@ -82,4 +106,41 @@ export const historicalWindowsManagedEnvironment = ({
     return undefined
   }
   return windowsManagedRuntimeLocation({ language, platform, runtimeId: interpreterKey })
+}
+
+export const relocatedWindowsManagedRuntimeId = ({
+  fromDataRoot,
+  toDataRoot,
+  language,
+  platform,
+  runtimeId
+}: {
+  fromDataRoot: string
+  toDataRoot: string
+  language: NotebookLanguage
+  platform: NodeJS.Platform
+  runtimeId: string
+}): string | undefined => {
+  const location = windowsManagedRuntimeLocation({ language, platform, runtimeId })
+  if (!location) return undefined
+  if (
+    windowsRuntimePathKey(location.runtimeRoot) !==
+    windowsRuntimePathKey(win32.join(fromDataRoot, 'runtime'))
+  ) {
+    return undefined
+  }
+  try {
+    if (resolveEnvName(language, location.environment) !== location.environment) return undefined
+  } catch {
+    return undefined
+  }
+  const prefix = win32.join(
+    toDataRoot,
+    'runtime',
+    'envs',
+    envDirectoryName(location.environment, platform)
+  )
+  return language === 'python'
+    ? win32.join(prefix, 'python.exe')
+    : win32.join(prefix, 'Lib', 'R', 'bin', 'R.exe')
 }

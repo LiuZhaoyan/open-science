@@ -29,7 +29,8 @@ import type {
 import { historicalPosixManagedEnvironment } from './posix-runtime-binding'
 import {
   historicalWindowsManagedEnvironment,
-  windowsRuntimePathKey
+  managedRuntimeEnvironmentNamesMatch,
+  managedRuntimeIdsDiffer
 } from './windows-runtime-binding'
 
 const log = createLogger('notebook:runtime-binding')
@@ -464,13 +465,17 @@ export class NotebookRuntimeBindingOwner {
     const replacement = discovered.find(
       (env) =>
         env.provenance === wire.provenance &&
-        (platform === 'win32'
-          ? env.condaEnv?.toLowerCase() === historical.environment.toLowerCase()
-          : env.condaEnv === historical.environment) &&
+        managedRuntimeEnvironmentNamesMatch({
+          platform,
+          candidate: env.condaEnv,
+          expected: historical.environment
+        }) &&
         env.runnable &&
-        (platform === 'win32'
-          ? windowsRuntimePathKey(env.envId) !== historical.interpreterKey
-          : env.envId !== historical.interpreterKey) &&
+        managedRuntimeIdsDiffer({
+          platform,
+          candidate: env.envId,
+          previous: historical.interpreterKey
+        }) &&
         (wasDisabled || isEnvEnabled(env, settings?.runtimeEnablement))
     )
     if (!replacement) return undefined

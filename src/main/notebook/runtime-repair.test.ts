@@ -259,6 +259,58 @@ describe('NotebookRuntimeRepairOwner', () => {
     expect(options.environmentOperations.clearRepair).toHaveBeenCalledWith('r:default-r')
   })
 
+  it('keeps another language sharing the repaired prefix quarantined', async () => {
+    const previousPython = binding(
+      'python',
+      '/runtime/envs/default-python/bin/python',
+      'managed',
+      'default-python'
+    )
+    const previousR = binding(
+      'r',
+      '/runtime/envs/default-python/bin/R',
+      'managed',
+      'default-python'
+    )
+    const replacementPython = binding(
+      'python',
+      '/runtime/envs/default-python/bin/python-new',
+      'managed',
+      'default-python'
+    )
+    const affected = session('affected', [previousPython, previousR])
+    affected.value.setKernelStatus('python:default-python', 'idle')
+    affected.value.setKernelStatus('r:default-python', 'running')
+    const { owner, options, runtimeRoot } = harness([affected.value])
+
+    await owner.prepareExplicitRepair('python', previousPython)
+
+    expect(affected.terminate).toHaveBeenCalledWith('python', 'default-python')
+    expect(affected.terminate).toHaveBeenCalledWith('r', 'default-python')
+    expect(affected.value.runtimeBinding('python')).toMatchObject({ reason: 'repair-required' })
+    expect(affected.value.runtimeBinding('r')).toMatchObject({ reason: 'repair-required' })
+    expect(readRepairRequiredReason(runtimeRoot, previousR.runtimeId)).toBe(
+      'protected-identity-change'
+    )
+
+    await owner.completeExplicitRepair('python', replacementPython)
+
+    expect(affected.value.runtimeBinding('python')).toMatchObject({
+      runtimeId: replacementPython.runtimeId,
+      status: 'active'
+    })
+    expect(affected.value.runtimeBinding('r')).toMatchObject({
+      runtimeId: previousR.runtimeId,
+      status: 'unavailable',
+      reason: 'repair-required'
+    })
+    expect(readRepairRequiredReason(runtimeRoot, previousR.runtimeId)).toBe(
+      'protected-identity-change'
+    )
+    expect(options.environmentOperations.clearRepair).toHaveBeenCalledWith('python:default-python')
+    expect(options.environmentOperations.clearRepair).not.toHaveBeenCalledWith('r:default-python')
+  })
+
   it('keeps a repaired binding unavailable when refreshed binding persistence fails', async () => {
     const previous = binding(
       'python',

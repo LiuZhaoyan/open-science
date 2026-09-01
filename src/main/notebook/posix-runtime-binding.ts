@@ -2,7 +2,7 @@ import { posix } from 'node:path'
 
 import type { NotebookLanguage } from '../../shared/notebook'
 import type { NotebookRuntimeBinding } from '../../shared/notebook-runtime'
-import { logicalEnvNameFromDirectory } from './runtime-paths'
+import { envDirectoryName, logicalEnvNameFromDirectory, resolveEnvName } from './runtime-paths'
 
 export type PosixManagedRuntimeLocation = {
   environment: string
@@ -68,4 +68,38 @@ export const historicalPosixManagedEnvironment = ({
     return undefined
   }
   return posixManagedRuntimeLocation({ language, platform, runtimeId: interpreterKey })
+}
+
+export const relocatedPosixManagedRuntimeId = ({
+  fromDataRoot,
+  toDataRoot,
+  language,
+  platform,
+  runtimeId
+}: {
+  fromDataRoot: string
+  toDataRoot: string
+  language: NotebookLanguage
+  platform: NodeJS.Platform
+  runtimeId: string
+}): string | undefined => {
+  const location = posixManagedRuntimeLocation({ language, platform, runtimeId })
+  if (!location) return undefined
+  if (
+    posix.normalize(location.runtimeRoot) !== posix.normalize(posix.join(fromDataRoot, 'runtime'))
+  ) {
+    return undefined
+  }
+  try {
+    if (resolveEnvName(language, location.environment) !== location.environment) return undefined
+  } catch {
+    return undefined
+  }
+  const prefix = posix.join(
+    toDataRoot,
+    'runtime',
+    'envs',
+    envDirectoryName(location.environment, platform)
+  )
+  return posix.join(prefix, 'bin', language === 'python' ? 'python' : 'R')
 }
