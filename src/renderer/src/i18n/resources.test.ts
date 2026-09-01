@@ -1090,7 +1090,7 @@ describe('mandatory product glossary', () => {
   it('uses concise infinitive labels for representative German interface actions', () => {
     expect({
       addSshHost: de.renderer['Add SSH host'],
-      alwaysTrustBrowser: de.renderer['Always trust this browser'],
+      trustBrowserFor180Days: de.renderer['Trust this browser for 180 days'],
       askEveryTime: de.renderer['Ask every time'],
       askForApproval: de.renderer['Ask for approval'],
       attachSkill: de.renderer['Attach skill'],
@@ -1117,7 +1117,7 @@ describe('mandatory product glossary', () => {
       uncheckAll: de.renderer['Uncheck all']
     }).toEqual({
       addSshHost: 'SSH-Host hinzufügen',
-      alwaysTrustBrowser: 'Diesem Browser immer vertrauen',
+      trustBrowserFor180Days: 'Diesem Browser 180 Tage vertrauen',
       askEveryTime: 'Jedes Mal nachfragen',
       askForApproval: 'Freigabe anfordern',
       attachSkill: 'Fähigkeit anhängen',
@@ -1745,7 +1745,11 @@ describe('mandatory product glossary', () => {
     expect(readme).toContain('Sitzungsnummern in der globalen Suche')
     expect(readme).toContain('Tastaturkürzel für eine neue Konversation')
     expect(readme).toContain('Schlüssel- oder Passwortauthentifizierung')
-    expect(readme).toContain('Open Science v0.23.0 veröffentlicht')
+    const rootPackage = JSON.parse(
+      readFileSync(join(__dirname, '..', '..', '..', '..', 'package.json'), 'utf8')
+    ) as { version: string }
+    // The banner assertion tracks the repo version instead of a hardcoded bump target.
+    expect(readme).toContain(`Open Science v${rootPackage.version} veröffentlicht`)
     expect(readme).toContain('CodeBuddy')
     expect(readme).toContain('Text-, Bild- und PDF-Anmerkungen')
     expect(readme).toContain('persistente Agentenerinnerungen')
@@ -2290,11 +2294,11 @@ describe('mandatory product glossary', () => {
     /\bKEY=VALUE\b/g,
     /<code>[^<]*<\/code>/gi
   ]
-  const additionalRequiredIdentifiers = {
+  const additionalRequiredIdentifiers: Record<string, string[]> = {
     'The ZIP contains app metadata, the specialist.json you fill in, and a README.txt guide. Skills placed in the skills folder are discovered automatically.':
       ['skills/']
-  } satisfies Record<string, string[]>
-  const spanishRequiredIdentifiers = {
+  }
+  const spanishRequiredIdentifiers: Record<string, string[]> = {
     'Leave empty for 22 or Port from ~/.ssh/config.': ['Port'],
     'Leave empty to use User from ~/.ssh/config.': ['User'],
     'Password authentication requires a User and Port and never uses keys or ssh-agent.': [
@@ -2307,7 +2311,7 @@ describe('mandatory product glossary', () => {
     'Star {{app}} on GitHub, {{count}} stars': ['Star'],
     "It's free and open source. Star it on GitHub to help others find it, and come build in public with us on Discord and X. Thanks for being here.":
       ['Star']
-  } satisfies Record<string, string[]>
+  }
   const exactTechnicalIdentifiers = (text: string): string[] =>
     exactTechnicalIdentifierPatterns
       .flatMap((identifier) => text.match(identifier) ?? [])
@@ -3208,7 +3212,7 @@ describe('Russian catalog quality', () => {
     expect(catalog('ru').Approve).toBe('Утвердить')
     expect(
       catalog('ru')[
-        'Choose "Always trust this browser" to skip approval on future visits to the same remote address.'
+        'Choose "Trust this browser for 180 days" to skip approval on future visits to the same remote address.'
       ]
     ).toContain('разрешение на доступ')
   })

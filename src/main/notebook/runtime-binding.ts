@@ -505,7 +505,9 @@ export class NotebookRuntimeBindingOwner {
         ? await injected(language)
         : discoverInterpreters(
             language,
-            defaultDiscoveryDeps(getRuntimeRoot(this.options.dataRoot), () => manualInterpreters)
+            defaultDiscoveryDeps(getRuntimeRoot(this.options.dataRoot), () => manualInterpreters, {
+              platform: this.options.platform
+            })
           )
     } catch {
       return []
