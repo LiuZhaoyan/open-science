@@ -773,7 +773,7 @@ describe('RuntimesPanel', () => {
     expect(repairBridge).toHaveBeenCalledWith('r', 'default-r', expect.any(String))
   })
 
-  it('surfaces Reset even when a runnable managed env is still present (interrupted upgrade/install)', async () => {
+  it('surfaces Reset in the existing managed runtime card after interrupted upgrade/install', async () => {
     await render()
     // Python HAS a runnable app-managed env, so the normal card renders — but an interrupted
     // upgrade/install may have quarantined its prefix. The recovery entry must still be reachable, or
@@ -788,11 +788,12 @@ describe('RuntimesPanel', () => {
         }
       })
     )
-    const notice = container.querySelector('[data-testid="runtimes-recovery-blocked-python"]')
-    expect(notice).not.toBeNull()
-    const resetBtn = Array.from(notice?.querySelectorAll('button') ?? []).find((b) =>
-      /^reset runtime$/i.test((b.textContent ?? '').trim())
+    const card = Array.from(container.querySelectorAll('[data-testid="runtime-card"]')).find(
+      (candidate) => candidate.textContent?.includes('Python 3.12 (managed)')
     )
+    expect(card).toBeDefined()
+    expect(container.querySelector('[data-testid="runtimes-recovery-blocked-python"]')).toBeNull()
+    const resetBtn = card?.querySelector('[data-testid="runtime-reset-python"]')
     expect(resetBtn).toBeDefined()
     expect(resetBtn?.getAttribute('data-variant')).toBe('default')
     await click(resetBtn ?? null)

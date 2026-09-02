@@ -2,7 +2,13 @@ import { win32 } from 'node:path'
 
 import type { NotebookLanguage } from '../../shared/notebook'
 import type { NotebookRuntimeBinding } from '../../shared/notebook-runtime'
-import { envDirectoryName, logicalEnvNameFromDirectory, resolveEnvName } from './runtime-paths'
+import {
+  DEFAULT_PY_ENV,
+  DEFAULT_R_ENV,
+  envDirectoryName,
+  logicalEnvNameFromDirectory,
+  resolveEnvName
+} from './runtime-paths'
 
 export type WindowsManagedRuntimeLocation = {
   environment: string
@@ -35,6 +41,14 @@ export const managedRuntimeIdsDiffer = ({
   previous: string
 }): boolean =>
   platform === 'win32' ? windowsRuntimePathKey(candidate) !== previous : candidate !== previous
+
+const logicalWindowsEnvironmentName = (directory: string): string => {
+  const logicalName = logicalEnvNameFromDirectory(directory)
+  const defaultName = [DEFAULT_PY_ENV, DEFAULT_R_ENV].find(
+    (name) => name.toLowerCase() === logicalName.toLowerCase()
+  )
+  return defaultName ?? logicalName
+}
 
 export const windowsManagedRuntimeLocation = ({
   language,
@@ -78,7 +92,7 @@ export const windowsManagedRuntimeLocation = ({
   }
 
   return {
-    environment: logicalEnvNameFromDirectory(win32.basename(environmentDirectory)),
+    environment: logicalWindowsEnvironmentName(win32.basename(environmentDirectory)),
     interpreterKey,
     runtimeRoot
   }

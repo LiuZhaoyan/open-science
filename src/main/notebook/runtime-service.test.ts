@@ -7461,7 +7461,7 @@ describe('v4 runtime bindings & agent tools', () => {
     })
     await service.execute({ sessionId: 'explicit', workspaceCwd: root, code: '2' })
 
-    await service.prepareRuntimeRepair('python', managedPy.envId)
+    await service.prepareRuntimeRepair('python', { kind: 'runtime', runtimeId: managedPy.envId })
 
     expect(terminations).toEqual(['python:default-python', 'python:default-python'])
     expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
@@ -7488,14 +7488,14 @@ describe('v4 runtime bindings & agent tools', () => {
     const root = await createStorageRoot()
     const service = bindingService(root, { discovered: [managedR, userPyA] })
 
-    await service.prepareRuntimeRepair('r', managedR.envId)
+    await service.prepareRuntimeRepair('r', { kind: 'runtime', runtimeId: managedR.envId })
     expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_R_ENV)).toBe(true)
     await service.completeRuntimeRepair('r')
     expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_R_ENV)).toBe(false)
 
-    await expect(service.prepareRuntimeRepair('python', userPyA.envId)).rejects.toThrow(
-      /no longer the app-managed python default/i
-    )
+    await expect(
+      service.prepareRuntimeRepair('python', { kind: 'runtime', runtimeId: userPyA.envId })
+    ).rejects.toThrow(/no longer the app-managed python default/i)
 
     const legacy: DiscoveredInterpreter = {
       ...managedPy,
@@ -7504,14 +7504,17 @@ describe('v4 runtime bindings & agent tools', () => {
       condaEnv: 'default-python-legacy'
     }
     const legacyService = bindingService(root, { discovered: [legacy] })
-    await expect(legacyService.prepareRuntimeRepair('python', legacy.envId)).rejects.toThrow(
-      /no longer the app-managed python default/i
-    )
+    await expect(
+      legacyService.prepareRuntimeRepair('python', { kind: 'runtime', runtimeId: legacy.envId })
+    ).rejects.toThrow(/no longer the app-managed python default/i)
 
     addRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV, 'protected-identity-change')
     const recoveryService = bindingService(root, { discovered: [] })
     await expect(
-      recoveryService.prepareRuntimeRepair('python', DEFAULT_PY_ENV)
+      recoveryService.prepareRuntimeRepair('python', {
+        kind: 'default-environment',
+        environmentName: DEFAULT_PY_ENV
+      })
     ).resolves.toBeUndefined()
   })
 
@@ -7524,7 +7527,10 @@ describe('v4 runtime bindings & agent tools', () => {
     const service = bindingService(root, { discovered: [brokenManagedPython] })
 
     await expect(
-      service.prepareRuntimeRepair('python', brokenManagedPython.envId)
+      service.prepareRuntimeRepair('python', {
+        kind: 'runtime',
+        runtimeId: brokenManagedPython.envId
+      })
     ).resolves.toBeUndefined()
     expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
   })
@@ -10492,7 +10498,7 @@ describe('v4 runtime bindings & agent tools', () => {
     })
     await vi.waitFor(() => expect(resolveRun).toBeDefined())
 
-    await service.prepareRuntimeRepair('python', managedPy.envId)
+    await service.prepareRuntimeRepair('python', { kind: 'runtime', runtimeId: managedPy.envId })
 
     await expect(run).resolves.toMatchObject({ status: 'cancelled' })
     expect(isRepairRequired(getRuntimeRoot(root), DEFAULT_PY_ENV)).toBe(true)
@@ -10546,10 +10552,18 @@ describe('v4 runtime bindings & agent tools', () => {
     const sessionId = 'legacy-defaults'
     const lane = createRootNotebookLane('default-project', sessionId, `root-frame-${sessionId}`)
     const runtimeRoot = getRuntimeRoot(root)
-    const legacyPython = join(runtimeRoot, 'envs', DEFAULT_PY_ENV, 'python.exe')
-    const legacyR = join(runtimeRoot, 'envs', DEFAULT_R_ENV, 'Lib', 'R', 'bin', 'R.exe')
-    const currentPython = join(runtimeRoot, 'envs', '.p', 'python.exe')
-    const currentR = join(runtimeRoot, 'envs', '.r', 'Lib', 'R', 'bin', 'R.exe')
+    const legacyPython = win32.join(runtimeRoot, 'envs', DEFAULT_PY_ENV.toUpperCase(), 'PYTHON.EXE')
+    const legacyR = win32.join(
+      runtimeRoot,
+      'envs',
+      DEFAULT_R_ENV.toUpperCase(),
+      'lib',
+      'r',
+      'BIN',
+      'r.exe'
+    )
+    const currentPython = win32.join(runtimeRoot, 'envs', '.p', 'python.exe')
+    const currentR = win32.join(runtimeRoot, 'envs', '.r', 'Lib', 'R', 'bin', 'R.exe')
 
     await repository.loadOrCreate({
       projectId: 'default-project',
@@ -10685,6 +10699,14 @@ describe('v4 runtime bindings & agent tools', () => {
       environment: DEFAULT_PY_ENV,
       provenance: 'app-managed' as const,
       previous: win32.join('D:\\Old\\OpenScience', 'runtime', 'envs', '.p', 'python.exe'),
+      current: win32.join('E:\\New\\OpenScience', 'runtime', 'envs', '.p', 'python.exe')
+    },
+    {
+      scenario: 'windows-legacy-default',
+      platform: 'win32' as const,
+      environment: DEFAULT_PY_ENV,
+      provenance: 'app-managed' as const,
+      previous: 'd:\\OLD\\OPENSCIENCE\\runtime\\envs\\DEFAULT-PYTHON\\PYTHON.EXE',
       current: win32.join('E:\\New\\OpenScience', 'runtime', 'envs', '.p', 'python.exe')
     },
     {

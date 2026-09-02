@@ -17,6 +17,7 @@ import {
   type ProvisionStatus,
   type RuntimeProvisioner
 } from './provisioner'
+import { explicitRuntimeRepairTarget, type ExplicitRuntimeRepairTarget } from './runtime-repair'
 import { DEFAULT_ENV_VERSION, DEFAULT_PY_ENV, envPrefix, readReadyMarker } from './runtime-paths'
 
 type NotebookEnvironmentLifecycle = {
@@ -38,7 +39,10 @@ type NotebookEnvironmentLifecycleDeps = {
   projectProgress: (progress: ProvisionProgress) => void
   waitForRecovery?: () => Promise<void>
   assertProvisionAllowed?: (language: NotebookLanguage) => void
-  onRepairStarting?: (language: NotebookLanguage, runtimeIdentity: string) => Promise<void> | void
+  onRepairStarting?: (
+    language: NotebookLanguage,
+    target: ExplicitRuntimeRepairTarget
+  ) => Promise<void> | void
   onRepairCompleted?: (language: NotebookLanguage) => Promise<void> | void
 }
 
@@ -143,7 +147,10 @@ const createNotebookEnvironmentLifecycle = (
         withDataRootWrite(async () => {
           if (deps.waitForRecovery) await deps.waitForRecovery()
           if (deps.onRepairStarting) {
-            await deps.onRepairStarting(parsedLanguage, runtimeIdentity)
+            await deps.onRepairStarting(
+              parsedLanguage,
+              explicitRuntimeRepairTarget(parsedLanguage, runtimeIdentity)
+            )
           }
           await provisioner.repair(parsedLanguage, report, {
             force: true,

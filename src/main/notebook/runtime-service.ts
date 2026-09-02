@@ -85,7 +85,7 @@ import type {
 import type { NotebookRuntimeSettings } from '../settings/capabilities'
 import { NotebookRecoveryCoordinator } from './recovery-coordinator'
 import { managedNotebookWorkingCache } from './windows-micromamba-working-cache'
-import { NotebookRuntimeRepairOwner } from './runtime-repair'
+import { NotebookRuntimeRepairOwner, type ExplicitRuntimeRepairTarget } from './runtime-repair'
 import { NotebookRuntimeRepairPolicy } from './runtime-repair-policy'
 import { NotebookEnvironmentOperations, type DefaultEnvProvisioner } from './environment-operations'
 import type { MicromambaRunner } from './windows-micromamba-runner'
@@ -1259,10 +1259,18 @@ class NotebookRuntimeService {
     this.recoveryCoordinator.clearRuntimeBlock(runtimeId)
   }
 
-  async prepareRuntimeRepair(language: NotebookLanguage, runtimeIdentity: string): Promise<void> {
+  async prepareRuntimeRepair(
+    language: NotebookLanguage,
+    target: ExplicitRuntimeRepairTarget
+  ): Promise<void> {
     const environment = this.defaultEnvNameFor(language)
     let binding: InternalRuntimeBinding | undefined
-    if (runtimeIdentity === environment) {
+    if (target.kind === 'default-environment') {
+      if (target.environmentName !== environment) {
+        throw new Error(
+          `The selected runtime is no longer the app-managed ${language} default. Recheck runtimes and try again.`
+        )
+      }
       if (
         !this.isDefaultEnvRecoveryBlocked(language) &&
         !this.repairPolicy.requirement(language, environment).required
@@ -1272,7 +1280,7 @@ class NotebookRuntimeService {
         )
       }
     } else {
-      binding = await this.runtimeBindingOwner.requireManagedDefault(language, runtimeIdentity)
+      binding = await this.runtimeBindingOwner.requireManagedDefault(language, target.runtimeId)
     }
     await this.runtimeRepair.prepareExplicitRepair(language, binding)
   }

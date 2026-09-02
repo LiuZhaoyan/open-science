@@ -55,7 +55,7 @@ import {
   buildSubagentModelMutation,
   buildVisionModelMutation
 } from './subagent-model-settings'
-import { relocatedManagedRuntimeId } from '../notebook/managed-runtime-relocation'
+import { relocateManagedRuntimeEnablement } from '../notebook/managed-runtime-relocation'
 
 type SkillMutationGuard = <T>(operation: () => Promise<T>) => Promise<T>
 type Write = Promise<StoredSettings>
@@ -571,34 +571,12 @@ class SettingsRepository {
     return this.mutate((settings) => {
       let notebookRuntimeEnablement = settings.notebookRuntimeEnablement
       if (update.previousDataRoot) {
-        const relocated = { ...notebookRuntimeEnablement }
-        let changed = false
-        for (const language of ['python', 'r'] as const) {
-          const current = notebookRuntimeEnablement?.[language]
-          if (!current) continue
-          const enabled = { ...current.enabled }
-          let languageChanged = false
-          for (const [runtimeId, isEnabled] of Object.entries(current.enabled)) {
-            if (isEnabled !== false) continue
-            const nextRuntimeId = relocatedManagedRuntimeId({
-              fromDataRoot: update.previousDataRoot,
-              toDataRoot: update.dataRoot,
-              language,
-              platform: process.platform,
-              runtimeId
-            })
-            if (!nextRuntimeId || enabled[nextRuntimeId] === false) continue
-            enabled[nextRuntimeId] = false
-            languageChanged = true
-          }
-          if (!languageChanged) continue
-          relocated[language] = {
-            enabled,
-            installAuthorized: { ...current.installAuthorized }
-          }
-          changed = true
-        }
-        if (changed) notebookRuntimeEnablement = relocated
+        notebookRuntimeEnablement = relocateManagedRuntimeEnablement({
+          enablement: notebookRuntimeEnablement,
+          fromDataRoot: update.previousDataRoot,
+          toDataRoot: update.dataRoot,
+          platform: process.platform
+        })
       }
       return {
         ...(update.onboardingCompletedAt === undefined

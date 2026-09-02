@@ -396,6 +396,7 @@ const RuntimesPanel = ({ title, description }: RuntimesPanelProps): React.JSX.El
         : envReadyLine(env, t)
     const showReady = env.runnable && !operationActive && operation?.error === undefined
     const defaultManaged = isDefaultManagedRuntime(language, env)
+    const recoveryBlocked = operation?.error?.includes('RUNTIME_RECOVERY_BLOCKED') === true
     return (
       <div
         key={env.envId}
@@ -478,11 +479,22 @@ const RuntimesPanel = ({ title, description }: RuntimesPanelProps): React.JSX.El
           </div>
         ) : null}
 
-        {defaultManaged && !operation?.error?.includes('RUNTIME_RECOVERY_BLOCKED') ? (
+        {defaultManaged ? (
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {operationActive ? (
               <Button type="button" variant="outline" size="sm" disabled>
                 {t('Reinstalling…')}
+              </Button>
+            ) : recoveryBlocked ? (
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                data-testid={`runtime-reset-${language}`}
+                disabled={busy || Boolean(statusError)}
+                onClick={() => requestManagedRepair(language, env.envId, env.label, 'reset')}
+              >
+                {t('Reset runtime')}
               </Button>
             ) : (
               <Button
@@ -647,39 +659,7 @@ const RuntimesPanel = ({ title, description }: RuntimesPanelProps): React.JSX.El
                 <div className="space-y-2" data-testid={`runtimes-cards-${id}`}>
                   {/* App-managed FIRST: a real card once provisioned, else a setup card in the same frame. */}
                   {managedEnv ? (
-                    <>
-                      {renderEnvCard(id, managedEnv, managedOperation)}
-                      {/* An interrupted upgrade/install usually leaves the interpreter present (so the
-                        card above still renders), but recovery may have quarantined its prefix. Surface
-                        the block + Reset here too, or the recovery entry would be unreachable whenever a
-                        runnable managed env exists. */}
-                      {!settingUp && langError?.includes('RUNTIME_RECOVERY_BLOCKED') ? (
-                        <div
-                          data-testid={`runtimes-recovery-blocked-${id}`}
-                          className="flex items-start justify-between gap-4 rounded-lg border border-destructive/40 bg-card p-3"
-                        >
-                          <p
-                            role="alert"
-                            className="text-[13px] text-destructive"
-                            data-testid={`runtimes-provision-error-${id}`}
-                          >
-                            {langError}
-                          </p>
-                          <Button
-                            type="button"
-                            variant="default"
-                            size="sm"
-                            className="shrink-0"
-                            disabled={busy || Boolean(statusError) || languageOperationActive(id)}
-                            onClick={() =>
-                              requestManagedRepair(id, managedEnv.envId, managedEnv.label, 'reset')
-                            }
-                          >
-                            {t('Reset runtime')}
-                          </Button>
-                        </div>
-                      ) : null}
-                    </>
+                    renderEnvCard(id, managedEnv, managedOperation)
                   ) : (
                     <div
                       data-testid="runtime-card"

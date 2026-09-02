@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 
-import { relocatedManagedRuntimeId } from './managed-runtime-relocation'
+import {
+  relocateManagedRuntimeEnablement,
+  relocatedManagedRuntimeId
+} from './managed-runtime-relocation'
 
 describe('relocatedManagedRuntimeId', () => {
   it.each([
@@ -28,8 +31,26 @@ describe('relocatedManagedRuntimeId', () => {
       language: 'python' as const,
       fromDataRoot: 'D:\\Old\\OpenScience',
       toDataRoot: 'E:\\New\\OpenScience',
-      runtimeId: 'D:\\Old\\OpenScience\\runtime\\envs\\default-python\\python.exe',
+      runtimeId: 'd:\\OLD\\OPENSCIENCE\\runtime\\envs\\DEFAULT-PYTHON\\PYTHON.EXE',
       expected: 'E:\\New\\OpenScience\\runtime\\envs\\.p\\python.exe'
+    },
+    {
+      scenario: 'Windows legacy default R',
+      platform: 'win32' as const,
+      language: 'r' as const,
+      fromDataRoot: 'D:\\Old\\OpenScience',
+      toDataRoot: 'E:\\New\\OpenScience',
+      runtimeId: 'd:\\OLD\\OPENSCIENCE\\runtime\\envs\\DEFAULT-R\\lib\\r\\BIN\\r.exe',
+      expected: 'E:\\New\\OpenScience\\runtime\\envs\\.r\\Lib\\R\\bin\\R.exe'
+    },
+    {
+      scenario: 'Windows named Python',
+      platform: 'win32' as const,
+      language: 'python' as const,
+      fromDataRoot: 'D:\\Old\\OpenScience',
+      toDataRoot: 'E:\\New\\OpenScience',
+      runtimeId: 'D:\\Old\\OpenScience\\runtime\\envs\\Analysis\\python.exe',
+      expected: 'E:\\New\\OpenScience\\runtime\\envs\\Analysis\\python.exe'
     },
     {
       scenario: 'Windows named R',
@@ -59,5 +80,54 @@ describe('relocatedManagedRuntimeId', () => {
         runtimeId
       })
     ).toBeUndefined()
+  })
+
+  it('relocates disabled Windows Python and R overrides without changing other preferences', () => {
+    const previousPython = 'd:\\OLD\\OPENSCIENCE\\runtime\\envs\\DEFAULT-PYTHON\\PYTHON.EXE'
+    const previousR = 'D:\\Old\\OpenScience\\runtime\\envs\\Analysis\\Lib\\R\\bin\\R.exe'
+    const externalPython = 'C:\\Python312\\python.exe'
+    const enablement = {
+      python: {
+        enabled: { [previousPython]: false, [externalPython]: false },
+        installAuthorized: { [previousPython]: true }
+      },
+      r: {
+        enabled: { [previousR]: false },
+        installAuthorized: { [previousR]: true }
+      }
+    }
+
+    const relocated = relocateManagedRuntimeEnablement({
+      enablement,
+      fromDataRoot: 'D:\\Old\\OpenScience',
+      toDataRoot: 'E:\\New\\OpenScience',
+      platform: 'win32'
+    })
+
+    expect(relocated).toEqual({
+      python: {
+        enabled: {
+          [previousPython]: false,
+          [externalPython]: false,
+          'E:\\New\\OpenScience\\runtime\\envs\\.p\\python.exe': false
+        },
+        installAuthorized: { [previousPython]: true }
+      },
+      r: {
+        enabled: {
+          [previousR]: false,
+          'E:\\New\\OpenScience\\runtime\\envs\\Analysis\\Lib\\R\\bin\\R.exe': false
+        },
+        installAuthorized: { [previousR]: true }
+      }
+    })
+    expect(
+      relocateManagedRuntimeEnablement({
+        enablement: relocated,
+        fromDataRoot: 'D:\\Old\\OpenScience',
+        toDataRoot: 'E:\\New\\OpenScience',
+        platform: 'win32'
+      })
+    ).toBe(relocated)
   })
 })

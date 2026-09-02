@@ -28,6 +28,7 @@ import {
   type NotebookEnvironmentLifecycle
 } from './environment-lifecycle-workflows'
 import type { ProvisionProgress, RuntimeProvisioner, RuntimeRepairOptions } from './provisioner'
+import type { ExplicitRuntimeRepairTarget } from './runtime-repair'
 
 afterEach(() => clearMigrationPending())
 
@@ -54,7 +55,10 @@ const createLifecycle = (
     projectProgress?: (progress: ProvisionProgress) => void
     waitForRecovery?: () => Promise<void>
     assertProvisionAllowed?: (language: 'python' | 'r') => void
-    onRepairStarting?: (language: 'python' | 'r', runtimeIdentity: string) => Promise<void> | void
+    onRepairStarting?: (
+      language: 'python' | 'r',
+      target: ExplicitRuntimeRepairTarget
+    ) => Promise<void> | void
     onRepairCompleted?: (language: 'python' | 'r') => Promise<void> | void
   } = {}
 ): NotebookEnvironmentLifecycle =>
@@ -159,20 +163,35 @@ describe('createNotebookEnvironmentLifecycle', () => {
 
   it('coordinates the selected runtime before entering destructive repair', async () => {
     const order: string[] = []
+    const onRepairStarting = vi.fn(async () => {
+      order.push('prepare')
+    })
     const provisioner = fakeProvisioner({
       repair: vi.fn(async () => {
         order.push('repair')
       })
     })
-    const lifecycle = createLifecycle(provisioner, {
-      onRepairStarting: async (language, runtimeIdentity) => {
-        order.push(`prepare:${language}:${runtimeIdentity}`)
-      }
-    })
+    const lifecycle = createLifecycle(provisioner, { onRepairStarting })
 
     await lifecycle.repair('python', '/runtime/default-python/python')
 
-    expect(order).toEqual(['prepare:python:/runtime/default-python/python', 'repair'])
+    expect(order).toEqual(['prepare', 'repair'])
+    expect(onRepairStarting).toHaveBeenCalledWith('python', {
+      kind: 'runtime',
+      runtimeId: '/runtime/default-python/python'
+    })
+  })
+
+  it('classifies a default-environment recovery separately from a discovered runtime', async () => {
+    const onRepairStarting = vi.fn()
+    const lifecycle = createLifecycle(fakeProvisioner(), { onRepairStarting })
+
+    await lifecycle.repair('r', 'default-r')
+
+    expect(onRepairStarting).toHaveBeenCalledWith('r', {
+      kind: 'default-environment',
+      environmentName: 'default-r'
+    })
   })
 
   it('does not enter destructive repair when runtime coordination fails', async () => {

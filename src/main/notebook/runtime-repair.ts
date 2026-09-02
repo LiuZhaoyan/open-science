@@ -15,7 +15,11 @@ import type { NotebookSessionAggregate, NotebookSessionRuntimeBinding } from './
 
 const REPAIR_QUARANTINE_FAILED = 'REPAIR_QUARANTINE_FAILED'
 
-type RuntimeRepairTarget = Readonly<{
+export type ExplicitRuntimeRepairTarget =
+  | Readonly<{ kind: 'default-environment'; environmentName: string }>
+  | Readonly<{ kind: 'runtime'; runtimeId: string }>
+
+type RuntimeRepairScope = Readonly<{
   language: NotebookLanguage
   environmentName: string
   binding?: NotebookSessionRuntimeBinding
@@ -40,6 +44,16 @@ type NotebookRuntimeRepairOwnerOptions = {
 const defaultEnvironment = (language: NotebookLanguage): string =>
   language === 'r' ? DEFAULT_R_ENV : DEFAULT_PY_ENV
 
+export const explicitRuntimeRepairTarget = (
+  language: NotebookLanguage,
+  runtimeIdentity: string
+): ExplicitRuntimeRepairTarget => {
+  const environmentName = defaultEnvironment(language)
+  return runtimeIdentity === environmentName
+    ? { kind: 'default-environment', environmentName }
+    : { kind: 'runtime', runtimeId: runtimeIdentity }
+}
+
 const processKey = (language: NotebookLanguage, environment: string): string =>
   `${language === 'r' ? 'r' : 'python'}:${resolveEnvName(language, environment)}`
 
@@ -52,7 +66,7 @@ class NotebookRuntimeRepairOwner {
     binding?: NotebookSessionRuntimeBinding
   ): Promise<void> {
     const environmentName = defaultEnvironment(language)
-    const target = { language, environmentName, binding } satisfies RuntimeRepairTarget
+    const target = { language, environmentName, binding } satisfies RuntimeRepairScope
     const affectedLanguages = ['python', 'r'] as const
     const sessions = this.matchingSessions(target, true)
     const repairKeys = new Set(this.options.policy.registryKeys(language, environmentName, binding))
@@ -199,7 +213,7 @@ class NotebookRuntimeRepairOwner {
     replacement: NotebookSessionRuntimeBinding
   ): Promise<void> {
     const environmentName = defaultEnvironment(language)
-    const target = { language, environmentName } satisfies RuntimeRepairTarget
+    const target = { language, environmentName } satisfies RuntimeRepairScope
     const aliases = new Set(this.options.policy.registryKeys(language, environmentName))
     for (const session of this.options.sessions()) {
       for (const [boundLanguage, binding] of session.runtimeBindingEntries()) {
@@ -245,7 +259,7 @@ class NotebookRuntimeRepairOwner {
   }
 
   completeRemovedManagedEnvironment(environmentName: string): void {
-    const target = { language: 'python', environmentName } satisfies RuntimeRepairTarget
+    const target = { language: 'python', environmentName } satisfies RuntimeRepairScope
     const aliases = new Set<string>()
     for (const language of ['python', 'r'] as const) {
       for (const key of this.options.policy.registryKeys(language, environmentName))
@@ -262,7 +276,7 @@ class NotebookRuntimeRepairOwner {
     for (const alias of aliases) clearRepairRequired(this.options.runtimeRoot, alias)
   }
 
-  private target(target: NotebookPackageAdmittedTarget): RuntimeRepairTarget {
+  private target(target: NotebookPackageAdmittedTarget): RuntimeRepairScope {
     return {
       language: target.request.language,
       environmentName: target.environmentName,
@@ -270,13 +284,13 @@ class NotebookRuntimeRepairOwner {
     }
   }
 
-  private registryKeys(target: RuntimeRepairTarget): Set<string> {
+  private registryKeys(target: RuntimeRepairScope): Set<string> {
     return new Set(
       this.options.policy.registryKeys(target.language, target.environmentName, target.binding)
     )
   }
 
-  private blockKey(target: RuntimeRepairTarget): string {
+  private blockKey(target: RuntimeRepairScope): string {
     return this.options.policy.blockKey(target.language, target.environmentName, target.binding)
   }
 
@@ -290,7 +304,7 @@ class NotebookRuntimeRepairOwner {
   private matches(
     session: RepairSession,
     language: NotebookLanguage,
-    target: RuntimeRepairTarget,
+    target: RuntimeRepairScope,
     crossLanguage: boolean
   ): boolean {
     const binding = session.runtimeBinding(language)
@@ -308,7 +322,7 @@ class NotebookRuntimeRepairOwner {
     )
   }
 
-  private matchingSessions(target: RuntimeRepairTarget, crossLanguage: boolean): RepairSession[] {
+  private matchingSessions(target: RuntimeRepairScope, crossLanguage: boolean): RepairSession[] {
     const languages: readonly NotebookLanguage[] = crossLanguage
       ? ['python', 'r']
       : [target.language]
@@ -317,10 +331,7 @@ class NotebookRuntimeRepairOwner {
     )
   }
 
-  private async restoreBindings(
-    target: RuntimeRepairTarget,
-    crossLanguage: boolean
-  ): Promise<void> {
+  private async restoreBindings(target: RuntimeRepairScope, crossLanguage: boolean): Promise<void> {
     const sessions = this.matchingSessions(target, crossLanguage).filter((session) =>
       session
         .runtimeBindingEntries()

@@ -3482,8 +3482,7 @@ const createApplicationModules = async (
     projectProgress: broadcastNotebookEnvProgress,
     waitForRecovery,
     assertProvisionAllowed,
-    onRepairStarting: (language, runtimeIdentity) =>
-      notebookService.prepareRuntimeRepair(language, runtimeIdentity),
+    onRepairStarting: (language, target) => notebookService.prepareRuntimeRepair(language, target),
     onRepairCompleted: (language) => notebookService.completeRuntimeRepair(language)
   })
   // Always register the handlers (serialized is undefined when the provisioner could not be built).
