@@ -10850,6 +10850,113 @@ describe('v4 runtime bindings & agent tools', () => {
     }
   )
 
+  it('waits for startup environment restoration before migrating a relocated binding', async () => {
+    const root = await createStorageRoot()
+    const repository = new NotebookRunRepository(root)
+    const sessionId = 'relocated-startup-race'
+    const lane = createRootNotebookLane('default-project', sessionId, `root-frame-${sessionId}`)
+    const previous = posix.join(
+      '/mnt/old/OpenScience',
+      'runtime',
+      'envs',
+      'analysis',
+      'bin',
+      'python'
+    )
+    const current = posix.join(
+      '/mnt/new/OpenScience',
+      'runtime',
+      'envs',
+      'analysis',
+      'bin',
+      'python'
+    )
+    let finishStartup!: () => void
+    const startup = new Promise<void>((resolve) => {
+      finishStartup = resolve
+    })
+    let restorationComplete = false
+    const discoverRuntimes = vi.fn(async (language: 'python' | 'r') =>
+      restorationComplete && language === 'python'
+        ? [
+            {
+              language: 'python' as const,
+              provenance: 'agent-created' as const,
+              envId: current,
+              interpreterPath: current,
+              label: 'analysis',
+              version: '3.12.4',
+              runnable: true,
+              condaEnv: 'analysis'
+            }
+          ]
+        : []
+    )
+
+    await repository.loadOrCreate({
+      projectId: 'default-project',
+      sessionId,
+      workspaceCwd: root,
+      lane
+    })
+    await repository.setRuntimeBindings(
+      'default-project',
+      sessionId,
+      {
+        python: {
+          language: 'python',
+          runtimeId: previous,
+          source: 'managed',
+          provenance: 'agent-created',
+          interpreterPath: previous,
+          label: 'analysis',
+          status: 'active'
+        }
+      },
+      lane
+    )
+
+    const service = bindingService(root, {
+      platform: 'linux',
+      repository,
+      discoverRuntimes
+    })
+    service.setEnvironmentStartupBarrier(startup)
+
+    const statePromise = service.state({ sessionId, workspaceCwd: root })
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    expect(discoverRuntimes).not.toHaveBeenCalled()
+
+    restorationComplete = true
+    finishStartup()
+
+    await expect(statePromise).resolves.toMatchObject({
+      runtimeBindings: {
+        python: {
+          runtimeId: current,
+          interpreterPath: current,
+          status: 'active'
+        }
+      }
+    })
+    await expect(
+      repository.loadOrCreate({
+        projectId: 'default-project',
+        sessionId,
+        workspaceCwd: root,
+        lane
+      })
+    ).resolves.toMatchObject({
+      runtimeBindings: {
+        python: {
+          runtimeId: current,
+          interpreterPath: current,
+          status: 'active'
+        }
+      }
+    })
+  })
+
   // WS9: certify the disable/binding lifecycle across the scenarios from the disable-binding spec.
   describe('disable lifecycle certification (WS9)', () => {
     it('dormant session: revoking a runtime with no live kernel marks it unavailable + rejects', async () => {

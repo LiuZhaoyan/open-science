@@ -53,6 +53,7 @@ type NotebookRuntimeBindingOwnerOptions = {
     Partial<Pick<NotebookRuntimeSettings, 'setEnvironmentEnabled'>>
   repairPolicy: Pick<NotebookRuntimeRepairPolicy, 'bindingRequirement'>
   discoverRuntimes?: (language: NotebookLanguage) => Promise<DiscoveredInterpreter[]>
+  waitForEnvironmentStartup?: () => Promise<void>
   platform?: NodeJS.Platform
 }
 
@@ -407,6 +408,12 @@ export class NotebookRuntimeBindingOwner {
     persisted: NotebookRuntimeBindings | undefined
   ): Promise<void> {
     if (!persisted) return
+    // A relocated managed prefix is rebuilt asynchronously from envs.lock during application startup.
+    // Do not classify its old-root binding as missing while that restore is still in flight: the live
+    // aggregate would otherwise remain unavailable even after the replacement interpreter appears.
+    if (Object.values(persisted).some((binding) => binding?.source === 'managed')) {
+      await this.options.waitForEnvironmentStartup?.()
+    }
     let migratedHistoricalBinding = false
     for (const language of ['python', 'r'] as const) {
       const wire = persisted[language]

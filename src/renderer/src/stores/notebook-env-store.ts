@@ -39,7 +39,11 @@ type NotebookEnvStore = NotebookEnvState & {
   cancel: (lang: NotebookLanguage) => Promise<void>
   retry: () => Promise<void>
   // Explicit recovery for a recovery-BLOCKED runtime (repair force-clears the quarantine + rebuilds).
-  reset: (lang: NotebookLanguage, runtimeIdentity: string) => Promise<void>
+  reset: (
+    lang: NotebookLanguage,
+    runtimeIdentity: string,
+    localizedFailureMessage: string
+  ) => Promise<void>
 }
 
 // Base status plus the ui the reducer derives from it, shared by the initial store state and tests.
@@ -333,7 +337,7 @@ export const useNotebookEnvStore = create<NotebookEnvStore>((set, get) => {
     // Explicit user recovery for a runtime that is recovery-BLOCKED (a prior setup's worker couldn't be
     // confirmed stopped). Repair force-clears the quarantine and rebuilds — the reachable "Reset" entry
     // for a block that won't clear on its own. Tracked per-language like provision.
-    reset: async (lang, runtimeIdentity) => {
+    reset: async (lang, runtimeIdentity, localizedFailureMessage) => {
       if (get().statusError) return
       const bridge = window.api?.notebookEnv
       applyUi({ scope: lang, error: undefined })
@@ -347,8 +351,10 @@ export const useNotebookEnvStore = create<NotebookEnvStore>((set, get) => {
       let failure: string | undefined
       try {
         await bridge.repair(lang, runtimeIdentity, run.operationId)
-      } catch (e) {
-        failure = errorText(e)
+      } catch {
+        // Main-process diagnostics are not renderer copy. Keep the detailed failure in main logs and
+        // expose only the caller-translated message supplied by the owning UI surface.
+        failure = localizedFailureMessage
       } finally {
         // A destructive repair can remove the discovered interpreter before rebuilding fails. Always
         // refresh the authoritative status so its durable repair marker can surface Reset immediately.

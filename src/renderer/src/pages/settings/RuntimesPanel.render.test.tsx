@@ -475,7 +475,7 @@ describe('RuntimesPanel', () => {
       (candidate) => candidate.textContent?.includes('Python 3.12 (managed)')
     )
     expect(card?.querySelector('[data-testid="runtime-operation-error-python"]')?.textContent).toBe(
-      'verification failed'
+      'Could not reinstall the runtime.'
     )
     expect(card?.querySelector('.lucide-circle-check')).toBeNull()
     expect(card?.textContent).not.toContain('Ready')

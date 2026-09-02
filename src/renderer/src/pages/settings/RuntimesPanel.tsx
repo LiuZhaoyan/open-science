@@ -333,10 +333,10 @@ const RuntimesPanel = ({ title, description }: RuntimesPanelProps): React.JSX.El
         ? t('Could not reinstall the runtime.')
         : t('Could not reset the runtime.')
     try {
-      await resetEnv(language, runtimeIdentity)
+      await resetEnv(language, runtimeIdentity, fallbackError)
       await recheckRuntimeSettings()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : fallbackError)
+    } catch {
+      setError(fallbackError)
     } finally {
       setManagedOperations((current) => ({ ...current, [language]: false }))
     }
@@ -807,17 +807,29 @@ const RuntimesPanel = ({ title, description }: RuntimesPanelProps): React.JSX.El
                     : t('Reinstall {{label}}?', { label: dialogManagedRepair?.label ?? '' })}
                 </AlertDialog.Title>
               </div>
-              <AlertDialog.Cancel asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  aria-label={t('Close')}
-                  className={dialogCloseButtonClassName}
-                >
-                  <X className="size-4" aria-hidden="true" />
-                </Button>
-              </AlertDialog.Cancel>
+              <TooltipProvider>
+                <Tooltip>
+                  <AlertDialog.Cancel asChild>
+                    <TooltipTrigger
+                      asChild
+                      onFocus={(event) => {
+                        if (!event.currentTarget.matches(':focus-visible')) event.preventDefault()
+                      }}
+                    >
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t('Close')}
+                        className={dialogCloseButtonClassName}
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </Button>
+                    </TooltipTrigger>
+                  </AlertDialog.Cancel>
+                  <TooltipContent>{t('Close')}</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             </div>
 
             <div className={dialogBodyClassName}>

@@ -3490,7 +3490,11 @@ const createApplicationModules = async (
   // Start maintenance only after all four Electron channels exist, preserving the previous startup
   // ordering while construction remains application-owned and single-instance.
   declareElectronAdapter('notebook-environment', () => {
-    installNotebookEnvironmentSurface(notebookEnvironmentLifecycle, registerNotebookEnvIpcHandlers)
+    const startup = installNotebookEnvironmentSurface(
+      notebookEnvironmentLifecycle,
+      registerNotebookEnvIpcHandlers
+    )
+    notebookService.setEnvironmentStartupBarrier(startup)
   })
   if (provisioner && serialized) {
     // Back the notebook service's manage_environments tool with the same provisioner that owns the env

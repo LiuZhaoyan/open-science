@@ -373,6 +373,7 @@ class NotebookRuntimeService {
     | 'refreshAfterPackageMutation'
   >
   private disposalPromise: Promise<{ reaped: boolean }> | undefined
+  private environmentStartupBarrier: Promise<void> = Promise.resolve()
 
   constructor(private readonly options: NotebookRuntimeServiceOptions) {
     const defaultProjectId = resolveProjectId(options)
@@ -406,6 +407,7 @@ class NotebookRuntimeService {
       runtimeSettings,
       repairPolicy: this.repairPolicy,
       discoverRuntimes: options.discoverRuntimes,
+      waitForEnvironmentStartup: () => this.environmentStartupBarrier,
       platform: options.platform
     })
     this.dependencyAnalyzer =
@@ -613,6 +615,10 @@ class NotebookRuntimeService {
   // main/ipc.ts alongside the env gate, after this service exists), mirroring the resolver setters.
   setEnvironmentManager(manager: NotebookEnvironmentManager): void {
     this.environmentManagement.setManager(manager)
+  }
+
+  setEnvironmentStartupBarrier(barrier: Promise<void>): void {
+    this.environmentStartupBarrier = barrier
   }
 
   // Wires the (serialized) default-env provisioner used to build default-python/default-r on demand.
