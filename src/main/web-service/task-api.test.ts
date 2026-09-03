@@ -14,7 +14,7 @@ import {
   type SessionComputeHostAccessMutation
 } from '../compute/session-compute-host-access'
 import { SessionEnabledComputeHostsOwner } from '../compute/session-enabled-hosts-owner'
-import type { TaskAgentPort } from '../tasks/task-runner'
+import type { TaskAgentPort, TaskSessionPort } from '../tasks/task-runner'
 import { HeadlessTaskApi } from './task-api'
 
 const project = {
@@ -58,10 +58,69 @@ const createAgent = (overrides: Partial<TaskAgentMock> = {}): TaskAgentMock => (
 
 const commandsFrom = (
   invoke: (channel: string, callerContext: CallerContext, args: unknown[]) => Promise<unknown>
-): ApplicationCommandByNameDispatcher => ({
-  commandNames: () => [],
-  invoke: (channel, invocation) => invoke(channel, invocation.callerContext, [...invocation.args])
-})
+): ApplicationCommandByNameDispatcher => {
+  const sessions = new Map<string, PersistedChatSession>()
+  return {
+    commandNames: () => [],
+    invoke: async (channel, invocation) => {
+      const args = [...invocation.args]
+      try {
+        const result = await invoke(channel, invocation.callerContext, args)
+        if (channel === 'sessions:load-all') {
+          for (const session of (result as { sessions?: PersistedChatSession[] })?.sessions ?? []) {
+            sessions.set(session.id, structuredClone(session))
+          }
+        } else if (channel === 'sessions:save-session') {
+          const saved = (result ?? args[0]) as PersistedChatSession
+          sessions.set(saved.id, structuredClone(saved))
+        }
+        if (result !== undefined) return result
+      } catch (error) {
+        if (
+          !channel.startsWith('sessions:') ||
+          ![
+            'sessions:stage-task-completion',
+            'sessions:settle-task-completion',
+            'sessions:fail-task-run'
+          ].includes(channel) ||
+          !(error instanceof Error && error.message.startsWith('Unexpected'))
+        ) {
+          throw error
+        }
+      }
+
+      if (channel === 'sessions:stage-task-completion') {
+        const request = args[0] as Parameters<TaskSessionPort['stageCompletion']>[0]
+        const current = structuredClone(sessions.get(request.sessionId)!)
+        if (request.message) current.messages.push(request.message)
+        current.activities = [...(current.activities ?? []), ...request.activities]
+        if (request.clearPendingHistoryReplay) delete current.pendingHistoryReplay
+        current.updatedAt = request.updatedAt
+        sessions.set(current.id, current)
+        return current
+      }
+      if (channel === 'sessions:settle-task-completion') {
+        const request = args[0] as Parameters<TaskSessionPort['settleCompletion']>[0]
+        const current = structuredClone(sessions.get(request.sessionId)!)
+        current.status = 'idle'
+        delete current.activeRun
+        current.artifacts = [...(current.artifacts ?? []), ...request.artifacts]
+        sessions.set(current.id, current)
+        return current
+      }
+      if (channel === 'sessions:fail-task-run') {
+        const request = args[0] as Parameters<TaskSessionPort['failRun']>[0]
+        const current = structuredClone(sessions.get(request.sessionId)!)
+        current.status = 'error'
+        current.error = request.error
+        delete current.activeRun
+        sessions.set(current.id, current)
+        return current
+      }
+      return undefined
+    }
+  }
+}
 
 const createComputePreferenceHarness = (
   existingSession?: PersistedChatSession
@@ -758,6 +817,34 @@ describe('HeadlessTaskApi adapter', () => {
     expect(invoke).toHaveBeenCalledWith('artifacts:finalize-run', taskCallerContext(), [
       { claimId: 'artifact-claim', messageId: 'attached-agent' }
     ])
+    expect(invoke).toHaveBeenCalledWith('sessions:stage-task-completion', taskCallerContext(), [
+      expect.objectContaining({
+        sessionId: existing.id,
+        promptMessageId: 'attached-user',
+        message: expect.objectContaining({ id: 'attached-agent' })
+      })
+    ])
+    expect(invoke).toHaveBeenCalledWith('sessions:settle-task-completion', taskCallerContext(), [
+      expect.objectContaining({
+        sessionId: existing.id,
+        promptMessageId: 'attached-user',
+        messageId: 'attached-agent'
+      })
+    ])
+    expect(invoke.mock.calls.map(([channel]) => channel)).toEqual(
+      expect.arrayContaining([
+        'sessions:stage-task-completion',
+        'artifacts:finalize-run',
+        'sessions:settle-task-completion'
+      ])
+    )
+    const terminalChannels = invoke.mock.calls.map(([channel]) => channel)
+    expect(terminalChannels.indexOf('sessions:stage-task-completion')).toBeLessThan(
+      terminalChannels.indexOf('artifacts:finalize-run')
+    )
+    expect(terminalChannels.indexOf('artifacts:finalize-run')).toBeLessThan(
+      terminalChannels.indexOf('sessions:settle-task-completion')
+    )
   })
 
   it('keeps deferred Session admission alive after remote authorization expires', async () => {
@@ -914,8 +1001,8 @@ describe('HeadlessTaskApi adapter', () => {
     expect(invoke).toHaveBeenCalledWith('sessions:save-session', context, [
       expect.objectContaining({ status: 'running' })
     ])
-    expect(invoke).toHaveBeenCalledWith('sessions:save-session', taskCallerContext(), [
-      expect.objectContaining({ status: 'idle' })
+    expect(invoke).toHaveBeenCalledWith('sessions:settle-task-completion', taskCallerContext(), [
+      expect.objectContaining({ sessionId: 'session-context' })
     ])
     expect(agent.createSession).toHaveBeenCalledWith({
       projectId: project.id,

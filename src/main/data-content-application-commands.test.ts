@@ -172,6 +172,9 @@ const createDependencies = () => {
     loadOne: vi.fn(),
     loadUsage: vi.fn(),
     saveSession: vi.fn(async () => ({ created: true, session })),
+    stageTaskCompletion: vi.fn(async () => session),
+    settleTaskCompletion: vi.fn(async () => session),
+    failTaskRun: vi.fn(async () => session),
     setDelegationPolicy: vi.fn(async () => session),
     deleteSession: vi.fn(async (): Promise<SessionDeletionResult> => ({
       status: 'deleted',
@@ -254,6 +257,9 @@ const WRAPPED_COMMAND_KEYS = [
   'sessionLoadUsage',
   'sessionSaveManifest',
   'sessionSave',
+  'sessionStageTaskCompletion',
+  'sessionSettleTaskCompletion',
+  'sessionFailTaskRun',
   'sessionSetDelegationPolicy',
   'sessionUnlinkPdfContext',
   'uploadStageLocalFile',
@@ -282,7 +288,7 @@ const dispatchCommand = (
 }
 
 describe('Data and content application commands', () => {
-  it('owns exactly the 55 current data and content invoke channels', () => {
+  it('owns exactly the 58 current data and content invoke channels', () => {
     expect(registeredCommands()).toEqual(
       [
         'artifacts:finalize-run',
@@ -330,6 +336,9 @@ describe('Data and content application commands', () => {
         'sessions:update-archive',
         'sessions:unlink-pdf-context',
         'sessions:save-session',
+        'sessions:stage-task-completion',
+        'sessions:settle-task-completion',
+        'sessions:fail-task-run',
         'sessions:set-delegation-policy',
         'uploads:abort-transfer',
         'uploads:append-transfer',
