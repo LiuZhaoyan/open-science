@@ -83,7 +83,7 @@ const commandsFrom = (
             'sessions:settle-task-completion',
             'sessions:fail-task-run'
           ].includes(channel) ||
-          !(error instanceof Error && error.message.startsWith('Unexpected'))
+          !(error instanceof Error && error.message.startsWith('Unexpected Task command:'))
         ) {
           throw error
         }
@@ -687,7 +687,7 @@ describe('HeadlessTaskApi adapter', () => {
         }
       }
       if (channel === 'preview-resources:release') return undefined
-      throw new Error(`Unexpected RPC channel: ${channel}`)
+      throw new Error(`Unexpected Task command: ${channel}`)
     })
     const api = new HeadlessTaskApi({ commands: commandsFrom(invoke), agent: createAgent() })
 
@@ -753,7 +753,7 @@ describe('HeadlessTaskApi adapter', () => {
       if (channel === 'sessions:load-all') return { sessions: [existing], manifest: { version: 1 } }
       if (channel === 'sessions:save-session') return args[0]
       if (channel === 'artifacts:finalize-run') return { ok: true, artifacts: [] }
-      throw new Error(`Unexpected RPC channel: ${channel} ${JSON.stringify(args)}`)
+      throw new Error(`Unexpected Task command: ${channel} ${JSON.stringify(args)}`)
     })
     const agent = createAgent({
       listAttachedSessionIds: vi.fn(async () => [existing.id]),
@@ -873,7 +873,7 @@ describe('HeadlessTaskApi adapter', () => {
         return { sessions: [existing], manifest: { version: 1 } }
       }
       if (channel === 'sessions:save-session') return args[0]
-      throw new Error(`Unexpected RPC channel: ${channel}`)
+      throw new Error(`Unexpected Task command: ${channel}`)
     })
     const agent = createAgent({
       listAttachedSessionIds: vi.fn(async () => [existing.id]),
@@ -928,7 +928,7 @@ describe('HeadlessTaskApi adapter', () => {
       if (channel === 'projects:list') return [project]
       if (channel === 'sessions:load-all') return { sessions: [existing], manifest: { version: 1 } }
       if (channel === 'sessions:save-session') return args[0]
-      throw new Error(`Unexpected RPC channel: ${channel} ${JSON.stringify(args)}`)
+      throw new Error(`Unexpected Task command: ${channel} ${JSON.stringify(args)}`)
     })
     const agent = createAgent({
       resumeSession: vi.fn(async () => ({ sessionId: existing.id, cwd: existing.cwd }))
@@ -973,7 +973,7 @@ describe('HeadlessTaskApi adapter', () => {
       if (channel === 'sessions:load-all') return { sessions: [], manifest: { version: 1 } }
       if (channel === 'sessions:save-session') return args[0]
       if (channel === 'preview-resources:release') return undefined
-      throw new Error(`Unexpected RPC channel: ${channel}`)
+      throw new Error(`Unexpected Task command: ${channel}`)
     })
     const agent = createAgent({
       createSession: vi.fn(async () => ({
@@ -1044,7 +1044,7 @@ describe('HeadlessTaskApi adapter', () => {
         authorizationCurrent = false
         return { sessions: [], manifest: { version: 1 } }
       }
-      throw new Error(`Unexpected RPC channel: ${channel}`)
+      throw new Error(`Unexpected Task command: ${channel}`)
     })
     const agent = createAgent()
     const api = new HeadlessTaskApi({ commands: commandsFrom(invoke), agent })
@@ -1073,7 +1073,7 @@ describe('HeadlessTaskApi adapter', () => {
         if (channel === 'projects:list') return [project]
         if (channel === 'sessions:load-all') return { sessions: [], manifest: { version: 1 } }
         if (channel === 'sessions:save-session') return args[0]
-        throw new Error(`Unexpected RPC channel: ${channel}`)
+        throw new Error(`Unexpected Task command: ${channel}`)
       }
     )
     const agent = createAgent({
@@ -1103,7 +1103,7 @@ describe('HeadlessTaskApi adapter', () => {
           return [{ id: 'review-1', turnMessageId: 'review-agent', lifecycle: 'running' }]
         }
         if (channel === 'reviewer:abort') return undefined
-        throw new Error(`Unexpected RPC channel: ${channel}`)
+        throw new Error(`Unexpected Task command: ${channel}`)
       }
     )
     const agent = createAgent({
@@ -1174,7 +1174,7 @@ describe('HeadlessTaskApi adapter', () => {
           expect(callerContext.isAuthorizationCurrent()).toBe(true)
           return [{ id: 'review-expired', turnMessageId: 'expired-agent', lifecycle: 'completed' }]
         }
-        throw new Error(`Unexpected RPC channel: ${channel}`)
+        throw new Error(`Unexpected Task command: ${channel}`)
       }
     )
     const agent = createAgent({
@@ -1242,7 +1242,7 @@ describe('HeadlessTaskApi adapter', () => {
           await abortGate
           return undefined
         }
-        throw new Error(`Unexpected RPC channel: ${channel}`)
+        throw new Error(`Unexpected Task command: ${channel}`)
       }
     )
     const agent = createAgent({
@@ -1306,7 +1306,7 @@ describe('HeadlessTaskApi adapter', () => {
         if (channel === 'projects:list') return [project]
         if (channel === 'sessions:load-all') return { sessions: [], manifest: { version: 1 } }
         if (channel === 'sessions:save-session') return args[0]
-        throw new Error(`Unexpected RPC channel: ${channel}`)
+        throw new Error(`Unexpected Task command: ${channel}`)
       }
     )
     const agent = createAgent({

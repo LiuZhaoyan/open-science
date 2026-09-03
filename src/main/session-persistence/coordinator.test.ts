@@ -479,6 +479,7 @@ describe('SessionPersistenceCoordinator', () => {
       createSession({
         revision: 3,
         status: 'running',
+        errorReportable: false,
         agentFrameworkId: 'codex',
         activeRun: { promptMessageId: prompt.id, startedAt: 1 },
         runtimeContext: { version: 1, revision: 2 },
@@ -559,6 +560,7 @@ describe('SessionPersistenceCoordinator', () => {
 
     expect(expectedRevisions).toEqual([3, 4])
     expect(durable).toMatchObject({ revision: 5, status: 'idle', activeRun: undefined })
+    expect(durable.errorReportable).toBeUndefined()
     expect(durable.runtimeContext).toEqual({ version: 1, revision: 2 })
     expect(durable.messages.map(({ id }) => id)).toEqual([
       prompt.id,

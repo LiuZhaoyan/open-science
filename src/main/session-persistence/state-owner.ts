@@ -636,7 +636,8 @@ class SessionPersistenceStateOwner {
     const session = await this.loadTaskRunAuthority(command)
     return this.persistTaskTerminalState(session, command, {
       status: 'idle',
-      error: undefined
+      error: undefined,
+      errorReportable: undefined
     })
   }
 
