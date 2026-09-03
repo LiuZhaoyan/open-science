@@ -151,6 +151,7 @@ export type MessagePdfContextSnapshot = SessionPdfContext &
 
 export type SessionPdfContextSource = Readonly<{
   sourceKind: SessionPdfBinding['sourceKind']
+  sourceFileId: string
   sourceVersionId: string
 }>
 
@@ -2920,7 +2921,7 @@ const normalizeSessionAfterRestore = (
   const hasCompletedResponse =
     session.status === 'idle' &&
     session.error === undefined &&
-    session.resumeRecovery?.cause === 'app-restart' &&
+    session.resumeRecovery !== undefined &&
     latestRecoveredPromptResponse?.status === 'complete'
   if (options.reconcileCompletedRecovery && hasCompletedResponse) {
     return {
@@ -4232,9 +4233,12 @@ const sanitizeSession = (
   if (runtimeContext) sanitized.runtimeContext = runtimeContext
   const planHistoryProjections = sanitizePlanHistoryProjections(session.planHistoryProjections)
   if (planHistoryProjections) sanitized.planHistoryProjections = planHistoryProjections
-  if (sanitized.status === 'waiting-plan-approval' && runtimeContext?.plan === undefined) {
+  if (
+    sanitized.status === 'waiting-plan-approval' &&
+    runtimeContext?.plan?.approval !== 'pending'
+  ) {
     // Approval waiting is meaningful only with restorable main-owned Plan authority. A corrupt or
-    // unknown context must not leave the conversation permanently blocked with nothing to approve.
+    // settled context must not leave the conversation permanently blocked with nothing to approve.
     sanitized.status = 'idle'
     sanitized.activeRun = undefined
   }
@@ -4591,6 +4595,7 @@ export type OpenSessionRecoveryFolderRequest = {
 const sessionPdfContextSourceSchema = z
   .object({
     sourceKind: z.enum(['artifact-version', 'upload-version']),
+    sourceFileId: z.string().min(1),
     sourceVersionId: z.string().min(1)
   })
   .strict()
