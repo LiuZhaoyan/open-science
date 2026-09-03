@@ -65,7 +65,10 @@ const FilePreviewDialog = ({
   const previewSurfaceRef = useRef<PreviewFileSurfaceHandle | null>(null)
   const requestClose = useCallback(
     (checkGuard = true): void => {
-      if (checkGuard && previewSurfaceRef.current?.confirmLeave() === false) return
+      if (checkGuard && previewSurfaceRef.current) {
+        previewSurfaceRef.current.requestLeave(() => onClose(true))
+        return
+      }
       onClose(true)
     },
     [onClose]
@@ -144,6 +147,7 @@ const FilePreviewDialog = ({
                   onPdfContextError={onPdfContextError}
                   tooltipClassName="z-[70]"
                   leaveGuardScope={dialogPreviewGuardScope(dialogItem.projectId, dialogItem.id)}
+                  retryResolutionEnabled={open}
                   {...annotationPort}
                 />
               ) : null}

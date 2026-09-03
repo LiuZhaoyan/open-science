@@ -129,6 +129,7 @@ const createDependencies = () => {
     listArtifactGroups: vi.fn(),
     listFiles: vi.fn(),
     repairIndex: vi.fn(),
+    resolveFile: vi.fn(),
     searchArtifacts: vi.fn()
   }
   const project = {
@@ -314,6 +315,7 @@ describe('Data and content application commands', () => {
         'project-files:list-artifact-groups',
         'project-files:list-files',
         'project-files:repair-index',
+        'project-files:resolve-file',
         'project-files:search-artifacts',
         'projects:create',
         'projects:update-archive',
@@ -471,6 +473,11 @@ describe('Data and content application commands', () => {
         key: 'projectFilesRepairIndex',
         args: [request('project-files-repair')],
         owner: deps.projectFiles.repairIndex
+      },
+      {
+        key: 'projectFilesResolveFile',
+        args: [request('project-files-resolve')],
+        owner: deps.projectFiles.resolveFile
       },
       {
         key: 'projectFilesSearchArtifacts',
@@ -1140,6 +1147,25 @@ describe('Data and content application commands', () => {
       deps.sessions.saveSession.mock.calls as unknown as Array<readonly [Record<string, unknown>]>
     )[0]?.[0]
     expect(savedSession?.runtimeContext).toBeUndefined()
+  })
+
+  it('grants Task callers authority to advance the Task Run commit witness', async () => {
+    const router = createApplicationCommandRouter()
+    const deps = createDependencies()
+    registerDataContentApplicationCommands(router.registrar, deps.dependencies)
+
+    await dispatchCommand(
+      router,
+      'sessionSave',
+      [{ ...deps.session, taskRunCommitId: 'run-1' }],
+      createTaskCallerContext()
+    ).result
+
+    expect(deps.sessions.saveSession).toHaveBeenCalledWith(
+      expect.objectContaining({ taskRunCommitId: 'run-1' }),
+      undefined,
+      { taskRunCommit: true }
+    )
   })
 
   it('normalizes graph-only Session arguments and results without preserving incomplete objects', async () => {

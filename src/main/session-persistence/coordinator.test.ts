@@ -553,13 +553,19 @@ describe('SessionPersistenceCoordinator', () => {
       projectId: durable.projectId,
       sessionId: durable.id,
       promptMessageId: prompt.id,
+      taskRunCommitId: 'task-run',
       messageId: taskMessage.id,
       artifacts: [{ id: 'task-artifact', kind: 'workspace-file', path: '/task.txt' }],
       updatedAt: 4
     })
 
     expect(expectedRevisions).toEqual([3, 4])
-    expect(durable).toMatchObject({ revision: 5, status: 'idle', activeRun: undefined })
+    expect(durable).toMatchObject({
+      revision: 5,
+      status: 'idle',
+      activeRun: undefined,
+      taskRunCommitId: 'task-run'
+    })
     expect(durable.errorReportable).toBeUndefined()
     expect(durable.runtimeContext).toEqual({ version: 1, revision: 2 })
     expect(durable.messages.map(({ id }) => id)).toEqual([
@@ -627,6 +633,7 @@ describe('SessionPersistenceCoordinator', () => {
       projectId: durable.projectId,
       sessionId: durable.id,
       promptMessageId: 'task-prompt',
+      taskRunCommitId: 'task-run',
       messageId: taskMessage.id,
       artifacts: [{ id: 'partial-artifact', kind: 'workspace-file', path: '/partial.txt' }],
       error: 'Provider failed',
@@ -640,6 +647,7 @@ describe('SessionPersistenceCoordinator', () => {
       activeRun: undefined,
       error: 'Provider failed',
       errorReportable: false,
+      taskRunCommitId: 'task-run',
       runtimeContext: { version: 1, revision: 4 }
     })
     expect(durable.messages.at(-1)?.artifactIds).toEqual(['partial-artifact'])
@@ -2017,6 +2025,32 @@ describe('SessionPersistenceCoordinator', () => {
     await coordinator.saveSession(createSession({ title: 'Renderer rename' }))
 
     expect(durable).toMatchObject({ title: 'Renderer rename', archivedAt: 10 })
+  })
+
+  it('lets only Task-owned saves advance the Task Run commit witness', async () => {
+    let durable = createSession({ taskRunCommitId: 'committed-run' })
+    const repository = createSessionRepository({
+      loadSessionWithDiagnostics: vi.fn(async () => ({
+        status: 'found' as const,
+        session: durable
+      })),
+      saveSession: vi.fn(async (session) => {
+        durable = structuredClone(session)
+      })
+    })
+    const coordinator = new SessionPersistenceCoordinator(repository, createFileIndex())
+
+    await coordinator.saveSession(
+      createSession({ title: 'Renderer rename', taskRunCommitId: 'forged-run' })
+    )
+    expect(durable).toMatchObject({ title: 'Renderer rename', taskRunCommitId: 'committed-run' })
+
+    await coordinator.saveSession(
+      { ...durable, taskRunCommitId: 'next-run' },
+      {},
+      { taskRunCommit: true }
+    )
+    expect(durable.taskRunCommitId).toBe('next-run')
   })
 
   it('updates delegation policy through its dedicated durable Session owner', async () => {

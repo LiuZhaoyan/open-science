@@ -248,6 +248,7 @@ const dataContentApplicationCommands = Object.freeze({
   ),
   projectFilesListFiles: projectFilesCommand('project-files:list-files', 'listFiles'),
   projectFilesRepairIndex: projectFilesCommand('project-files:repair-index', 'repairIndex'),
+  projectFilesResolveFile: projectFilesCommand('project-files:resolve-file', 'resolveFile'),
   projectFilesSearchArtifacts: projectFilesCommand(
     'project-files:search-artifacts',
     'searchArtifacts'
@@ -416,6 +417,7 @@ const dataContentApplicationCommandGroups = Object.freeze([
     dataContentApplicationCommands.projectFilesListArtifactGroups,
     dataContentApplicationCommands.projectFilesListFiles,
     dataContentApplicationCommands.projectFilesRepairIndex,
+    dataContentApplicationCommands.projectFilesResolveFile,
     dataContentApplicationCommands.projectFilesSearchArtifacts
   ] as const),
   defineApplicationCommandGroup('projects', [
@@ -582,6 +584,7 @@ const registerDataContentApplicationCommands = (
         dependencies.projectFiles.listArtifactGroups(args[0]),
       'project-files:list-files': ({ args }) => dependencies.projectFiles.listFiles(args[0]),
       'project-files:repair-index': ({ args }) => dependencies.projectFiles.repairIndex(args[0]),
+      'project-files:resolve-file': ({ args }) => dependencies.projectFiles.resolveFile(args[0]),
       'project-files:search-artifacts': ({ args }) =>
         dependencies.projectFiles.searchArtifacts(args[0])
     })
@@ -705,7 +708,12 @@ const registerDataContentApplicationCommands = (
         return dependencies.withDataRootWrite(async () => {
           let result: Awaited<ReturnType<SessionPersistenceHandlers['saveSession']>>
           try {
-            result = await dependencies.sessions.saveSession(invocation.args[0], invocation.args[1])
+            result =
+              invocation.callerContext.surface === 'task'
+                ? await dependencies.sessions.saveSession(invocation.args[0], invocation.args[1], {
+                    taskRunCommit: true
+                  })
+                : await dependencies.sessions.saveSession(invocation.args[0], invocation.args[1])
           } catch (error) {
             if (SessionPersistence.isSessionRevisionConflictError(error)) {
               throw new ApplicationCommandError(
