@@ -1319,7 +1319,7 @@ describe('task CLI', () => {
     expect(setExitCode).not.toHaveBeenCalled()
   })
 
-  it('keeps the authoritative Run failure when the event stream times out mid-run', async () => {
+  it('keeps the authoritative Run failure in JSONL when the event stream times out', async () => {
     const streamFailure = Object.assign(
       new Error('Open Science event stream timed out after 30000 milliseconds.'),
       { code: 'timeout' }
@@ -1377,7 +1377,7 @@ describe('task CLI', () => {
           prompt: 'Research this.',
           wait: true,
           json: false,
-          jsonl: false
+          jsonl: true
         }
       },
       {
@@ -1389,7 +1389,14 @@ describe('task CLI', () => {
       }
     )
 
-    expect(log).toHaveBeenCalledWith('Run failed: Provider failed')
+    expect(warn).toHaveBeenCalledWith(
+      'Run event stream stopped: Open Science event stream timed out after 30000 milliseconds. Final Run state will still be read from Open Science.'
+    )
+    expect(JSON.parse(log.mock.calls[0][0])).toMatchObject({
+      id: 'run-1',
+      status: 'failed',
+      error: 'Provider failed'
+    })
     expect(setExitCode).toHaveBeenCalledWith(1)
   })
 
