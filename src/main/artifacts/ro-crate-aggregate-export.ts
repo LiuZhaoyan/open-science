@@ -23,6 +23,7 @@ const MAX_VERSION_SOURCES = 10_000
 const MAX_ARCHIVE_ENTRIES = 10_000
 const MAX_COMPLETE_CONTENT_BYTES = 256 * 1024 * 1024
 const MAX_METADATA_BYTES = 64 * 1024 * 1024
+const SHA256_CHECKSUM = /^[0-9a-f]{64}$/u
 
 type AggregateScopeFields = {
   projectId: string
@@ -45,7 +46,20 @@ type AggregateRoCrateContentReaders = {
 const reference = (id: string): { '@id': string } => ({ '@id': id })
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0
-const pathSegment = (value: string): string => encodeURIComponent(value)
+const WINDOWS_RESERVED_BASENAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/iu
+const pathSegment = (value: string): string => {
+  const basename = value.split('.')[0]!
+  if (
+    !value ||
+    value === '.' ||
+    value === '..' ||
+    /[. ]$/u.test(value) ||
+    WINDOWS_RESERVED_BASENAME.test(basename)
+  ) {
+    throw new Error(`RO-Crate archive path segment is not portable: ${value}`)
+  }
+  return encodeURIComponent(value)
+}
 const versionDatasetId = (source: ArtifactVersionRoCrateSource): string =>
   `artifacts/${pathSegment(source.evidence.artifact_id)}/versions/${pathSegment(source.evidence.version_id)}/`
 const contextualPrefix = (source: ArtifactVersionRoCrateSource): string =>
@@ -70,6 +84,9 @@ const validateAggregateSource = (source: AggregateRoCrateSource): void => {
   const versionIds = new Set<string>()
   const fileVersions = new Map<string, { checksum: string; size: number }>()
   const recordFileVersion = (id: string, checksum: string, size: number): void => {
+    if (!SHA256_CHECKSUM.test(checksum)) {
+      throw new Error(`RO-Crate content checksum is invalid: ${id}`)
+    }
     const existing = fileVersions.get(id)
     if (existing && (existing.checksum !== checksum || existing.size !== size)) {
       throw new Error(`RO-Crate content identity conflict: ${id}`)
@@ -84,7 +101,11 @@ const validateAggregateSource = (source: AggregateRoCrateSource): void => {
       descriptor.artifactId !== evidence.artifact_id ||
       descriptor.id !== evidence.version_id ||
       descriptor.versionId !== evidence.version_id ||
-      descriptor.versionNumber !== evidence.version_number
+      descriptor.versionNumber !== evidence.version_number ||
+      descriptor.name !== evidence.filename ||
+      descriptor.size !== evidence.size_bytes ||
+      descriptor.checksum !== evidence.checksum ||
+      descriptor.createdAt !== evidence.created_at
     ) {
       throw new Error(`RO-Crate Artifact Version identity mismatch: ${evidence.version_id}`)
     }
@@ -93,6 +114,14 @@ const validateAggregateSource = (source: AggregateRoCrateSource): void => {
       (source.scope === 'session' && evidence.app_session_id !== source.sessionId)
     ) {
       throw new Error(`RO-Crate Artifact Version is outside the ${source.scope} scope`)
+    }
+    if (
+      version.review &&
+      (version.review.selectedVersionId !== evidence.version_id ||
+        version.review.selectedVersionAssessment.projectId !== evidence.project_id ||
+        version.review.selectedVersionAssessment.sessionId !== evidence.app_session_id)
+    ) {
+      throw new Error(`RO-Crate reviewer identity mismatch: ${evidence.version_id}`)
     }
     if (descriptor.state !== 'finalized') {
       throw new Error(
@@ -188,7 +217,7 @@ const buildAggregateMetadata = (
     metadataDescriptor(),
     aggregateRoot(source, profile, versionIds, partial)
   ]
-  const seen = new Set(graph.map((entity) => entity['@id']))
+  const entitiesById = new Map(graph.map((entity) => [entity['@id'], entity]))
 
   for (const version of versions) {
     const packaged = packaging.get(version.evidence.version_id)
@@ -199,11 +228,20 @@ const buildAggregateMetadata = (
       rootId: versionDatasetId(version),
       rootName: `${version.evidence.filename} (Artifact Version v${version.evidence.version_number})`,
       contextualIdPrefix: contextualPrefix(version),
-      includeMetadataDescriptor: false
+      includeMetadataDescriptor: false,
+      strictEntityIds: true
     })
     for (const candidate of fragment['@graph']) {
-      if (seen.has(candidate['@id'])) continue
-      seen.add(candidate['@id'])
+      const existing = entitiesById.get(candidate['@id'])
+      if (existing) {
+        const sharedCompleteContent =
+          profile === 'complete' && candidate['@id'].startsWith('data/sha256/')
+        if (!sharedCompleteContent && JSON.stringify(existing) !== JSON.stringify(candidate)) {
+          throw new Error(`RO-Crate entity ID conflict: ${candidate['@id']}`)
+        }
+        continue
+      }
+      entitiesById.set(candidate['@id'], candidate)
       graph.push(candidate)
     }
   }
@@ -320,13 +358,7 @@ const contentClaims = (
 
 const groupContentClaims = (claims: readonly ContentClaim[]): ContentGroup[] => {
   const groups = new Map<string, ContentGroup>()
-  const identities = new Map<string, { checksum: string; size: number }>()
   for (const claim of claims) {
-    const identity = identities.get(claim.fileVersionId)
-    if (identity && (identity.checksum !== claim.checksum || identity.size !== claim.size)) {
-      throw new Error(`RO-Crate content identity conflict: ${claim.fileVersionId}`)
-    }
-    identities.set(claim.fileVersionId, { checksum: claim.checksum, size: claim.size })
     const existing = groups.get(claim.checksum)
     if (existing) {
       if (existing.size !== claim.size) {
@@ -427,10 +459,14 @@ const buildAggregateCompleteRoCrateArchive = async (
   if (sidecarBytes > MAX_METADATA_BYTES) {
     throw new Error('RO-Crate aggregate metadata budget exceeded')
   }
-  if (1 + sidecarCount + groups.length > MAX_ARCHIVE_ENTRIES) {
+  if (1 + sidecarCount > MAX_ARCHIVE_ENTRIES) {
     throw new Error('RO-Crate aggregate archive entry budget exceeded')
   }
   for (const group of groups) await readContentGroup(group)
+  const includedContentCount = groups.filter((group) => group.path).length
+  if (1 + sidecarCount + includedContentCount > MAX_ARCHIVE_ENTRIES) {
+    throw new Error('RO-Crate aggregate archive entry budget exceeded')
+  }
 
   const packaging = new Map<string, VersionPackaging>()
   const entries: Zippable = {}

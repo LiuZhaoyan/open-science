@@ -43,6 +43,7 @@ type RoCrateMetadataOptions = {
   rootName?: string
   contextualIdPrefix?: string
   includeMetadataDescriptor?: boolean
+  strictEntityIds?: boolean
 }
 
 const fragment = (value: string): string => value.replace(/[^a-zA-Z0-9._~-]+/gu, '-')
@@ -142,7 +143,13 @@ const buildArtifactVersionRoCrateMetadata = (
   const graph: RoCrateEntity[] = []
   const contextualIds: string[] = []
   const add = (entity: RoCrateEntity, contextual = false): void => {
-    if (graph.some((existing) => existing['@id'] === entity['@id'])) return
+    const existing = graph.find((candidate) => candidate['@id'] === entity['@id'])
+    if (existing) {
+      if (options.strictEntityIds && JSON.stringify(existing) !== JSON.stringify(entity)) {
+        throw new Error(`RO-Crate entity ID conflict: ${entity['@id']}`)
+      }
+      return
+    }
     graph.push(entity)
     if (contextual) contextualIds.push(entity['@id'])
   }

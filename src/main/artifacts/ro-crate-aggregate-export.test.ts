@@ -2,9 +2,11 @@ import { strFromU8, unzipSync } from 'fflate'
 import { describe, expect, it, vi } from 'vitest'
 
 import type {
+  ArtifactExecutionSnapshot,
   ArtifactVersionDescriptor,
   ArtifactVersionEvidence
 } from '../../shared/artifact-provenance'
+import type { ArtifactVersionReviewProjection } from '../../shared/reviewer'
 import {
   buildAggregateCompleteRoCrateArchive,
   buildAggregateRoCrateArchive,
@@ -68,8 +70,78 @@ const artifactSource = (
     environment_status: { state: 'unavailable', reason: 'not-captured' },
     ...overrides
   }
+  descriptor.name = evidence.filename
+  descriptor.size = evidence.size_bytes
+  descriptor.checksum = evidence.checksum
+  descriptor.createdAt = evidence.created_at
   return { descriptor, contentStatus: { state: 'available' }, evidence }
 }
+
+const reviewFor = (versionId: string): ArtifactVersionReviewProjection => ({
+  binding: 'version',
+  selectedVersionId: versionId,
+  selectedVersionAssessment: {
+    id: 'review-1',
+    projectId: 'project-1',
+    sessionId: 'session-1',
+    turnMessageId: 'message-1',
+    scope: { turnMessageId: 'message-1', blocks: [], artifactVersionIds: [versionId] },
+    lifecycle: 'complete',
+    outcome: 'pass',
+    model: 'reviewer-model',
+    reviewerLog: [],
+    createdAt: 0,
+    updatedAt: 0,
+    checks: [],
+    scopeSnapshot: { state: 'available', blocks: [] }
+  },
+  latestChainReview: {
+    id: 'review-1',
+    projectId: 'project-1',
+    sessionId: 'session-1',
+    turnMessageId: 'message-1',
+    scope: { turnMessageId: 'message-1', blocks: [], artifactVersionIds: [versionId] },
+    lifecycle: 'complete',
+    outcome: 'pass',
+    model: 'reviewer-model',
+    reviewerLog: [],
+    createdAt: 0,
+    updatedAt: 0,
+    checks: [],
+    scopeSnapshot: { state: 'available', blocks: [] }
+  },
+  selectedVersionChecks: [],
+  turnLevelChecks: [],
+  selectedVersionDispositions: [],
+  history: []
+})
+
+const executionWithRunIds = (runIds: readonly string[]): ArtifactExecutionSnapshot => ({
+  schemaVersion: 2,
+  rootFrameId: 'root-frame-1',
+  agentFrameId: 'agent-frame-1',
+  messageBranchId: 'branch-1',
+  terminalPromptMessageId: 'prompt-1',
+  producerRunId: runIds[0],
+  producerRunIndex: 1,
+  createdAt: '2026-09-11T00:00:00.000Z',
+  inputFiles: [],
+  runs: runIds.map((runId, index) => ({
+    runId,
+    runIndex: index + 1,
+    agentFrameId: 'agent-frame-1',
+    messageBranchId: 'branch-1',
+    runtimeSegmentId: `segment-${index}`,
+    promptMessageId: 'prompt-1',
+    kernelKind: 'python',
+    script: '',
+    status: 'completed',
+    startedAt: '2026-09-11T00:00:00.000Z',
+    completedAt: '2026-09-11T00:00:01.000Z',
+    outputs: [],
+    inputFileVersionKeys: []
+  }))
+})
 
 const sessionSource = (
   versions: readonly ArtifactVersionRoCrateSource[] = [artifactSource()]
@@ -162,6 +234,32 @@ describe('aggregate RO-Crate export', () => {
     ]
   ] as const)('rejects an invalid aggregate source: %s', (_label, makeSource) => {
     expect(() => buildAggregateRoCrateMetadata(makeSource())).toThrow('RO-Crate')
+  })
+
+  it('rejects reviewer evidence bound to another Artifact Version', () => {
+    const value = artifactSource()
+    value.review = reviewFor('another-version')
+    expect(() => buildAggregateRoCrateMetadata(sessionSource([value]))).toThrow(
+      'RO-Crate reviewer identity mismatch'
+    )
+  })
+
+  it('rejects lossy contextual ID collisions instead of discarding provenance', () => {
+    const value = artifactSource()
+    value.execution = executionWithRunIds(['a/b', 'a b'])
+    expect(() => buildAggregateRoCrateMetadata(sessionSource([value]))).toThrow(
+      'RO-Crate entity ID conflict'
+    )
+  })
+
+  it('rejects Artifact IDs that are unsafe on portable filesystems', () => {
+    const value = artifactSource()
+    value.descriptor.versionId = 'version-1.'
+    value.descriptor.id = 'version-1.'
+    value.evidence.version_id = 'version-1.'
+    expect(() => buildAggregateRoCrateMetadata(sessionSource([value]))).toThrow(
+      'RO-Crate archive path segment is not portable'
+    )
   })
 
   it('builds a deterministic lightweight archive with isolated version provenance', () => {
