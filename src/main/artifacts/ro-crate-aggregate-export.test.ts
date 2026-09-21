@@ -382,6 +382,47 @@ describe('aggregate RO-Crate export', () => {
     )
   })
 
+  it('deduplicates matching payload and input content within one version', async () => {
+    const bytes = Buffer.from('same content')
+    const checksum = sha256(bytes)
+    const value = artifactSource(1, {
+      filename: 'result.csv',
+      content_type: 'text/csv',
+      size_bytes: bytes.byteLength,
+      checksum,
+      inputs: [
+        {
+          ordinal: 1,
+          input_file_version_id: 'input-version-1',
+          source_kind: 'upload-version',
+          source_file_id: 'upload-1',
+          source_version_number: 1,
+          source_project_id: 'project-1',
+          source_session_id: 'session-1',
+          filename: 'source.txt',
+          content_type: 'text/plain',
+          size_bytes: bytes.byteLength,
+          checksum,
+          storage_key: 'uploads/input-version-1',
+          strongest_association: 'turn-attached'
+        }
+      ]
+    })
+    const readVersionContent = vi.fn(async () => bytes)
+    const readInputContent = vi.fn(async () => bytes)
+    const archive = await buildAggregateCompleteRoCrateArchive(sessionSource([value]), {
+      readVersionContent,
+      readInputContent
+    })
+
+    expect(readVersionContent.mock.calls.length + readInputContent.mock.calls.length).toBe(1)
+    expect(entity(archiveMetadata(archive), `data/sha256/${checksum}`)).toMatchObject({
+      name: 'result.csv',
+      alternateName: ['source.txt'],
+      encodingFormat: ['text/csv', 'text/plain']
+    })
+  })
+
   it('stores matching content once and keeps each immutable version identity', async () => {
     const bytes = Buffer.from('same content')
     const checksum = sha256(bytes)

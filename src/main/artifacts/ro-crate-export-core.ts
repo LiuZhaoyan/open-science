@@ -137,6 +137,7 @@ const buildArtifactVersionRoCrateMetadata = (
   const packagedDataPaths = new Map(
     [...(options.packagedDataPaths ?? [])].map(([versionId, path]) => [versionId, uriPath(path)])
   )
+  const sharedPackagedEntityIds = new Set(packagedDataPaths.values())
   const omittedDataReasons = options.omittedDataReasons ?? new Map<string, string>()
   const payloadId =
     packagedDataPaths.get(evidence.version_id) ?? versionEntityId(evidence.version_id)
@@ -145,7 +146,11 @@ const buildArtifactVersionRoCrateMetadata = (
   const add = (entity: RoCrateEntity, contextual = false): void => {
     const existing = graph.find((candidate) => candidate['@id'] === entity['@id'])
     if (existing) {
-      if (options.strictEntityIds && JSON.stringify(existing) !== JSON.stringify(entity)) {
+      if (
+        options.strictEntityIds &&
+        !sharedPackagedEntityIds.has(entity['@id']) &&
+        JSON.stringify(existing) !== JSON.stringify(entity)
+      ) {
         throw new Error(`RO-Crate entity ID conflict: ${entity['@id']}`)
       }
       return
