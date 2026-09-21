@@ -437,6 +437,7 @@ describe('Artifact Provenance repository architecture', () => {
       'src/main/artifacts/provenance-unindexed-recovery.ts',
       'src/main/artifacts/provenance-version-writer.ts',
       'src/main/artifacts/ro-crate-export.test.ts',
+      'src/main/artifacts/ro-crate-export-core.ts',
       'src/main/artifacts/ro-crate-export.ts',
       'src/main/artifacts/reviewer-turn-file-evidence-reader.ts',
       'src/main/artifacts/write-budget-owner.ts',
