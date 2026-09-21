@@ -134,10 +134,7 @@ const buildArtifactVersionRoCrateMetadata = (
     options.contextualIdPrefix ? contextualId(path) : standaloneId
   // ZIP entry names are filesystem paths; JSON-LD identifiers are URI references.
   const packagedDataPaths = new Map(
-    [...(options.packagedDataPaths ?? [])].map(([versionId, path]) => [
-      versionId,
-      uriPath(path)
-    ])
+    [...(options.packagedDataPaths ?? [])].map(([versionId, path]) => [versionId, uriPath(path)])
   )
   const omittedDataReasons = options.omittedDataReasons ?? new Map<string, string>()
   const payloadId =
@@ -359,8 +356,8 @@ const buildArtifactVersionRoCrateMetadata = (
       name: assessment.model,
       description: 'Automated reviewer model that assessed this Artifact Version.'
     }
-    const checkIds = review.selectedVersionChecks.map(
-      (check) => contextualId(`review-check/${fragment(check.id)}`)
+    const checkIds = review.selectedVersionChecks.map((check) =>
+      contextualId(`review-check/${fragment(check.id)}`)
     )
     assessActionEntity = {
       '@type': 'AssessAction',
@@ -469,6 +466,7 @@ const buildArtifactVersionRoCrateMetadata = (
       `${evidence.filename} (Artifact Version v${evidence.version_number}) RO-Crate`,
     // This crate describes the immutable version's publication, not the export time.
     datePublished: evidence.created_at,
+    ...(options.rootId ? { version: `v${evidence.version_number}` } : {}),
     license: NO_ADDITIONAL_RIGHTS,
     description:
       profile === 'lightweight'
@@ -638,11 +636,15 @@ export {
   COMPLETE_PROFILE,
   LIGHTWEIGHT_PROFILE,
   RO_CRATE_CONTEXT,
-  RO_CRATE_SPECIFICATION
+  RO_CRATE_SPECIFICATION,
+  NO_ADDITIONAL_RIGHTS,
+  ZIP_MTIME,
+  provenanceSidecars
 }
 export type {
   ArtifactVersionRoCrateContentReaders,
   ArtifactVersionRoCrateSource,
   RoCrateEntity,
-  RoCrateMetadataDocument
+  RoCrateMetadataDocument,
+  RoCrateMetadataOptions
 }
